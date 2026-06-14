@@ -17,7 +17,17 @@ st.set_page_config(page_title="Helios — Growth Diagnosis", page_icon="📉", l
 
 @st.cache_resource(show_spinner=False)
 def get_client(project: str):
+    """BigQuery client. On Streamlit Cloud, auth via a [gcp_service_account] secret;
+    locally, fall back to your gcloud Application Default Credentials."""
     from google.cloud import bigquery
+    try:
+        info = dict(st.secrets["gcp_service_account"])  # set in Streamlit Cloud secrets
+    except Exception:
+        info = None
+    if info:
+        from google.oauth2 import service_account
+        creds = service_account.Credentials.from_service_account_info(info)
+        return bigquery.Client(credentials=creds, project=project or creds.project_id)
     return bigquery.Client(project=project) if project else bigquery.Client()
 
 
