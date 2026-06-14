@@ -184,6 +184,34 @@ else:
                 st.write(f"• `{c}`")
             st.caption(f"Model: {res.model}. No SQL authored by the LLM; no stat computed in prose.")
 
+# ---- honest benchmark: Helios vs naive baseline ----
+st.divider()
+st.markdown("### 📊 Benchmark — Helios vs a naive baseline")
+st.caption("Honest offline eval: we inject **known** funnel anomalies (rate-changes and "
+           "mix-shifts) into the real segment mix, then check which method recovers the true "
+           "cause. The naive 'largest-segment-delta' baseline is structurally blind to "
+           "mix-shifts — that's where the governed decomposition earns its keep.")
+try:
+    from helios.eval.runner import base_segments_from_df, score_benchmark
+    bench = score_benchmark(base_segments_from_df(df))
+    bc1, bc2 = st.columns(2)
+    bc1.metric("Helios accuracy (segment + effect)",
+               f"{bench.helios_effect_acc * 100:.0f}%",
+               f"{bench.helios_effect_correct}/{bench.n} scenarios")
+    bc2.metric("Naive baseline accuracy",
+               f"{bench.baseline_segment_acc * 100:.0f}%",
+               f"{bench.baseline_segment_correct}/{bench.n} scenarios", delta_color="off")
+    with st.expander("Per-scenario results"):
+        bdf = pd.DataFrame(bench.rows)[
+            ["scenario", "truth_effect", "helios_correct", "baseline_correct"]
+        ].rename(columns={"scenario": "Injected scenario", "truth_effect": "True cause",
+                          "helios_correct": "Helios ✓", "baseline_correct": "Naive ✓"})
+        st.dataframe(bdf, hide_index=True, use_container_width=True)
+    st.caption("Controlled-attribution accuracy (we know the injected cause) — it proves we "
+               "recover the right driver, not causation.")
+except Exception as e:  # noqa: BLE001
+    st.warning(f"Benchmark unavailable: {e}")
+
 with st.expander("How is this computed?"):
     st.markdown(
         "- **Data**: `fct_daily_funnel` (governed dbt mart), sliced by `channel_group × device_category`.\n"
