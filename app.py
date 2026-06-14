@@ -1,0 +1,142 @@
+"""Helios — Growth Diagnosis dashboard (Streamlit).
+
+Presents the autonomous mix-vs-rate funnel diagnosis: it is a VIEWER for the Decision
+Brief, not an ad-hoc BI tool. Run:  streamlit run app.py
+Needs the dbt marts built and `gcloud auth application-default login` done.
+"""
+from __future__ import annotations
+import os
+
+import pandas as pd
+import streamlit as st
+
+from helios.diagnosis import load_weekly, weeks_in, biggest_move, run_diagnosis, FUNNEL_STEPS
+
+st.set_page_config(page_title="Helios — Growth Diagnosis", page_icon="📉", layout="wide")
+
+
+@st.cache_resource(show_spinner=False)
+def get_client(project: str):
+    from google.cloud import bigquery
+    return bigquery.Client(project=project) if project else bigquery.Client()
+
+
+@st.cache_data(ttl=600, show_spinner="Loading funnel data from BigQuery…")
+def get_data(project: str, dataset: str):
+    return load_weekly(get_client(project), project, dataset)
+
+
+# ---- header ----
+st.title("📉 Helios — Autonomous Growth Diagnosis")
+st.caption("Governed mix-vs-rate funnel diagnosis on the GA4 Google Merchandise Store. "
+           "Every number is a governed-mart + deterministic-stats output — no LLM, no hand-written SQL.")
+
+# ---- sidebar: data source ----
+with st.sidebar:
+    st.header("⚙️ Data source")
+    project = st.text_input("GCP project", os.environ.get("HELIOS_PROJECT", "helios-mvp"))
+    dataset = st.text_input("Marts dataset", os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
+
+try:
+    df = get_data(project, dataset)
+except Exception as e:  # noqa: BLE001
+    st.error(f"Couldn't load data from `{project}.{dataset}.fct_daily_funnel`.\n\n{e}\n\n"
+             "Have you run `dbt build` and `gcloud auth application-default login`?")
+    st.stop()
+
+weeks = weeks_in(df)
+if len(weeks) < 2:
+    st.warning("Need at least two weeks of data to compare.")
+    st.stop()
+
+auto0, auto1 = biggest_move(df)
+
+with st.sidebar:
+    st.header("📅 Compare weeks")
+    use_auto = st.checkbox("Auto: biggest week-over-week move", value=True)
+    if use_auto:
+        w0, w1 = auto0, auto1
+        st.caption(f"Biggest move detected: **{w0} → {w1}**")
+    else:
+        w0 = st.selectbox("Baseline week", weeks, index=weeks.index(auto0))
+        later = [w for w in weeks if w > w0] or [weeks[-1]]
+        w1 = st.selectbox("Compare week", later,
+                          index=later.index(auto1) if auto1 in later else 0)
+
+d = run_diagnosis(df, w0, w1)
+
+# ---- headline metrics ----
+direction = "drop" if d.delta < 0 else "rise"
+st.subheader(f"Session conversion {direction}:  {w0}  →  {w1}")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Conversion — baseline", f"{d.conv_t0 * 100:.2f}%")
+c2.metric("Conversion — compare", f"{d.conv_t1 * 100:.2f}%", f"{d.delta * 100:+.2f} pts")
+c3.metric("p-value", f"{d.p_value:.1e}")
+c4.metric("Revenue at risk", f"${d.revenue_at_risk:,.0f}")
+
+if d.significant:
+    st.success(f"**Statistically significant** (p = {d.p_value:.1e} < 0.05).")
+else:
+    st.warning(f"Not statistically significant (p = {d.p_value:.1e}) — monitor, don't act yet.")
+
+# ---- why it moved: mix vs rate ----
+st.markdown("### Why it moved — mix-shift vs rate-change")
+why = pd.DataFrame(
+    {"effect": ["mix (composition)", "rate (behaviour)", "interaction"],
+     "points": [d.mix * 100, d.rate * 100, d.interaction * 100]}
+).set_index("effect")
+st.bar_chart(why, height=220)
+
+if d.dominant == "mix":
+    st.info("**Dominant effect: MIX** — your traffic composition shifted between segments that "
+            "convert differently. The funnel itself may be fine; don't 'fix checkout' blindly.")
+else:
+    st.info("**Dominant effect: RATE** — a real in-segment behaviour change. Worth a funnel / UX "
+            "investigation in the top driver segment below.")
+
+# ---- funnel + drivers ----
+left, right = st.columns([1, 1.3])
+
+with left:
+    st.markdown(f"### Funnel — {w1}")
+    fdf = pd.DataFrame(
+        {"sessions": [d.funnel_t1[lbl] for _, lbl in FUNNEL_STEPS]},
+        index=[lbl for _, lbl in FUNNEL_STEPS],
+    )
+    st.bar_chart(fdf, height=300)
+
+with right:
+    st.markdown("### Top driver segments")
+    dd = pd.DataFrame(d.drivers).rename(columns={
+        "segment": "Segment", "total_pts": "Total Δ (pts)", "mix_pts": "Mix (pts)",
+        "rate_pts": "Rate (pts)", "conv_t0_pct": "Conv before %", "conv_t1_pct": "Conv after %",
+    })
+    st.dataframe(
+        dd.style.format({
+            "Total Δ (pts)": "{:+.3f}", "Mix (pts)": "{:+.3f}", "Rate (pts)": "{:+.3f}",
+            "Conv before %": "{:.2f}", "Conv after %": "{:.2f}",
+        }).background_gradient(subset=["Total Δ (pts)"], cmap="RdYlGn"),
+        hide_index=True, use_container_width=True,
+    )
+
+# ---- recommended action ----
+st.markdown("### ✅ Recommended action")
+if not d.significant:
+    st.write("Move is not statistically significant — **monitor**, do not act yet.")
+elif d.dominant == "mix":
+    st.write("Investigate the **traffic-mix shift** (acquisition / channel changes), not the funnel.")
+else:
+    top = d.drivers[0]["segment"] if d.drivers else "the top segment"
+    st.write(f"Drill the rate change in **{top}** — run a funnel-step diagnosis and a targeted "
+             f"experiment there; it carries the largest in-segment behaviour move "
+             f"(**${d.revenue_at_risk:,.0f}** at risk this week).")
+
+with st.expander("How is this computed?"):
+    st.markdown(
+        "- **Data**: `fct_daily_funnel` (governed dbt mart), sliced by `channel_group × device_category`.\n"
+        "- **Decomposition**: `ΔR = mix + rate + interaction` (`helios.stats.decompose_change`), the "
+        "Simpson's-paradox-safe split of the aggregate conversion change.\n"
+        "- **Significance**: pooled two-proportion z-test (`helios.stats.two_proportion_ztest`).\n"
+        "- **Revenue at risk**: `rate_effect × sessions × AOV`. No LLM, no hand-written SQL."
+    )

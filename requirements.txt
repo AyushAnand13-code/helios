@@ -10,3 +10,4 @@ pyyaml>=6.0
 mcp>=1.0
 anthropic>=0.39
 pytest>=8.0
+streamlit>=1.30        # the diagnosis dashboard (app.py)
