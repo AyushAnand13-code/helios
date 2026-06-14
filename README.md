@@ -1,5 +1,12 @@
 # Helios — Project Structure & Manifest
 
+> 🚀 **Live demo → https://helios-5be8rdzgr7vprmfhxqsj4k.streamlit.app/**
+> An interactive growth-diagnosis dashboard on real GA4 data: it finds the biggest
+> week-over-week conversion move, separates **mix-shift from rate-change**, tests
+> significance, and prices it in **dollars of revenue-at-risk** — all from governed dbt
+> marts + a deterministic stats engine (no LLM, no hand-written SQL).
+> Run it locally with `streamlit run app.py`. *(Free tier: first load may take ~30s to wake.)*
+
 > **Repository restructured 2026-06-03** into `docs/{architecture,planning,strategy,archive}/`, `models/semantic/`, `eval/`, and (empty) implementation dirs (`dbt/ mcp/ agents/ backend/ frontend/ tests/ scripts/ notebooks/`). The authoritative current layout is in `MIGRATION_REPORT.md` and `REPO_RESTRUCTURE_PLAN.md`. The detailed sections below predate the restructure — still accurate on *what Helios is*, but file paths have moved.
 
 > Paste this whole file into ChatGPT (or any LLM) to give it complete context on what has been built.
