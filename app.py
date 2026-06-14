@@ -15,22 +15,33 @@ from helios.diagnosis import load_weekly, weeks_in, biggest_move, run_diagnosis,
 
 st.set_page_config(page_title="Helios — Growth Diagnosis", layout="wide")
 
-# ---- look & feel: light CSS for a livelier, presentation-ready dashboard ----
+# ---- look & feel: modern dark, multi-colour, presentation-ready ----
 st.markdown(
     """
     <style>
+      /* glassy metric cards with a neon top stripe */
       [data-testid="stMetric"] {
-        background: #FFFFFF;
-        border: 1px solid #EFE2D4;
-        border-left: 5px solid #EA580C;
-        border-radius: 12px;
-        padding: 14px 18px;
-        box-shadow: 0 1px 4px rgba(80,40,0,0.06);
+        background: linear-gradient(145deg, #161D30 0%, #0E1422 100%);
+        border: 1px solid #242C42;
+        border-radius: 14px;
+        padding: 18px 18px 14px;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+        position: relative; overflow: hidden;
       }
-      [data-testid="stMetricLabel"] p { color: #7A6A59; font-weight: 600; }
-      h3 { color: #B45309; padding-top: .3rem; }
-      .stButton > button { border-radius: 10px; font-weight: 600; }
-      [data-testid="stExpander"] { border-radius: 10px; }
+      [data-testid="stMetric"]::before {
+        content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: linear-gradient(90deg, #22D3EE 0%, #7C5CFF 50%, #F472B6 100%);
+      }
+      [data-testid="stMetricValue"] { color: #F4F6FC; font-weight: 700; }
+      [data-testid="stMetricLabel"] p { color: #9AA6C4; font-weight: 600; }
+      h3 { color: #A78BFA; padding-top: .35rem; letter-spacing: .2px; }
+      .stButton > button {
+        border: 0; border-radius: 11px; font-weight: 700; color: #fff;
+        background: linear-gradient(135deg, #7C5CFF 0%, #DB2777 100%);
+      }
+      .stButton > button:hover { filter: brightness(1.1); }
+      [data-testid="stExpander"] { border-radius: 11px; border-color: #242C42; }
+      a { color: #38BDF8; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -74,12 +85,13 @@ def get_data(project: str, dataset: str):
 # ---- header banner ----
 st.markdown(
     """
-    <div style="background: linear-gradient(135deg,#9A3412 0%,#EA580C 55%,#F59E0B 100%);
-                padding: 1.5rem 1.8rem; border-radius: 16px; margin-bottom: 1.2rem;
-                box-shadow: 0 4px 18px rgba(180,83,9,0.25);">
-      <div style="color:#fff; font-size:2.05rem; font-weight:800; letter-spacing:.3px;">
+    <div style="background: linear-gradient(120deg,#4F46E5 0%,#7C3AED 28%,#DB2777 64%,#06B6D4 100%);
+                padding: 1.7rem 1.9rem; border-radius: 18px; margin-bottom: 1.3rem;
+                box-shadow: 0 10px 34px rgba(124,58,237,0.40);">
+      <div style="color:#fff; font-size:2.2rem; font-weight:800; letter-spacing:.3px;
+                  text-shadow: 0 2px 10px rgba(0,0,0,0.25);">
         Helios — Autonomous Growth Diagnosis</div>
-      <div style="color:#FFEAD5; font-size:1.02rem; margin-top:.35rem;">
+      <div style="color:#EEF0FF; font-size:1.05rem; margin-top:.4rem; opacity:.95;">
         Governed mix-vs-rate funnel diagnosis on real GA4 data — no LLM-written SQL, no in-prose math.</div>
     </div>
     """,
@@ -140,8 +152,8 @@ st.markdown("### Why it moved — mix-shift vs rate-change")
 why = pd.DataFrame(
     {"effect": ["mix (composition)", "rate (behaviour)", "interaction"],
      "points": [d.mix * 100, d.rate * 100, d.interaction * 100]}
-).set_index("effect")
-st.bar_chart(why, height=220)
+)
+st.bar_chart(why, x="effect", y="points", color="effect", height=240)
 
 if d.dominant == "mix":
     st.info("**Dominant effect: MIX** — your traffic composition shifted between segments that "
