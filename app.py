@@ -126,7 +126,7 @@ with right:
         dd.style.format({
             "Total Δ (pts)": "{:+.3f}", "Mix (pts)": "{:+.3f}", "Rate (pts)": "{:+.3f}",
             "Conv before %": "{:.2f}", "Conv after %": "{:.2f}",
-        }).background_gradient(subset=["Total Δ (pts)"], cmap="RdYlGn"),
+        }),
         hide_index=True, use_container_width=True,
     )
 
