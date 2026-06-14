@@ -53,10 +53,23 @@ class BriefResult:
 
 
 def generate_decision_brief(df, registry_path, api_key: str,
-                            model: str = DEFAULT_MODEL) -> BriefResult:
-    """Run the grounded brief with Gemini and return the narrative + the tools it called."""
+                            model: str = DEFAULT_MODEL,
+                            focus_weeks: tuple | None = None) -> BriefResult:
+    """Run the grounded brief with Gemini and return the narrative + the tools it called.
+
+    If focus_weeks=(w0, w1) is given, the brief diagnoses that specific move (so a UI can
+    keep the narrative in sync with the weeks on screen); otherwise the model picks the
+    biggest week-over-week move itself.
+    """
     tools = GovernedTools(df, registry_path)
-    text = _run_gemini(SYSTEM_PROMPT, USER_PROMPT, tools, api_key, model)
+    user = USER_PROMPT
+    if focus_weeks:
+        w0, w1 = focus_weeks
+        user = (f"Produce the Helios Decision Brief focused on the session-conversion move "
+                f"from the week of {w0} to the week of {w1}. Call "
+                f"diagnose_conversion_change with week_baseline='{w0}' and "
+                f"week_compare='{w1}', then write the brief and recommend an action.")
+    text = _run_gemini(SYSTEM_PROMPT, user, tools, api_key, model)
     return BriefResult(text=text, tool_calls=tools.calls, model=model)
 
 

@@ -6,6 +6,7 @@ Needs the dbt marts built and `gcloud auth application-default login` done.
 """
 from __future__ import annotations
 import os
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -13,6 +14,19 @@ import streamlit as st
 from helios.diagnosis import load_weekly, weeks_in, biggest_move, run_diagnosis, FUNNEL_STEPS
 
 st.set_page_config(page_title="Helios — Growth Diagnosis", page_icon="📉", layout="wide")
+
+REGISTRY_PATH = Path(__file__).resolve().parent / "models" / "semantic" / "semantic_layer.yaml"
+
+
+def _gemini_key() -> str | None:
+    """Gemini key from Streamlit secrets (cloud) or env var (local)."""
+    try:
+        k = st.secrets["GEMINI_API_KEY"]
+        if k:
+            return k
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 
 @st.cache_resource(show_spinner=False)
@@ -142,11 +156,41 @@ else:
              f"experiment there; it carries the largest in-segment behaviour move "
              f"(**${d.revenue_at_risk:,.0f}** at risk this week).")
 
+# ---- grounded AI Decision Brief (v1) ----
+st.divider()
+st.markdown("### 🧠 AI Decision Brief")
+st.caption("An LLM (Gemini) writes the executive brief by **calling the governed tools** — "
+           "it never writes SQL or computes a statistic. Every figure traces to a tool output.")
+
+key = _gemini_key()
+if not key:
+    st.info("Set a **GEMINI_API_KEY** to enable the AI brief — a Streamlit *secret* on the "
+            "cloud, or an env var locally. Get a free key at https://aistudio.google.com/apikey")
+else:
+    if st.button("✍️ Generate AI brief", type="primary"):
+        with st.spinner("Gemini is calling governed tools and writing the brief…"):
+            try:
+                from helios.llm.brief import generate_decision_brief
+                st.session_state["brief"] = generate_decision_brief(
+                    df, str(REGISTRY_PATH), key, focus_weeks=(w0, w1))
+            except Exception as e:  # noqa: BLE001
+                st.session_state["brief"] = None
+                st.error(f"Brief generation failed: {e}")
+    res = st.session_state.get("brief")
+    if res:
+        st.markdown(res.text)
+        with st.expander("🔎 Grounding — the governed tools the model called"):
+            for c in res.tool_calls:
+                st.write(f"• `{c}`")
+            st.caption(f"Model: {res.model}. No SQL authored by the LLM; no stat computed in prose.")
+
 with st.expander("How is this computed?"):
     st.markdown(
         "- **Data**: `fct_daily_funnel` (governed dbt mart), sliced by `channel_group × device_category`.\n"
         "- **Decomposition**: `ΔR = mix + rate + interaction` (`helios.stats.decompose_change`), the "
         "Simpson's-paradox-safe split of the aggregate conversion change.\n"
         "- **Significance**: pooled two-proportion z-test (`helios.stats.two_proportion_ztest`).\n"
-        "- **Revenue at risk**: `rate_effect × sessions × AOV`. No LLM, no hand-written SQL."
+        "- **Revenue at risk**: `rate_effect × sessions × AOV`.\n"
+        "- **AI brief**: an LLM calls the governed tools above (grounding) — it never writes SQL "
+        "or computes a statistic itself."
     )
