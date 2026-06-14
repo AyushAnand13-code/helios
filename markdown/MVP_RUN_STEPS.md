@@ -100,7 +100,7 @@ In the repo root (`C:\Users\anand\helios`):
 py -3.12 -m venv .venv
 .venv\Scripts\activate
 pip install -U pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 The prompt should now start with `(.venv)`. The install pulls dbt, BigQuery, scipy,
 etc. (~2–3 min).
