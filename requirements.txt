@@ -5,4 +5,5 @@ streamlit>=1.30
 pandas>=2.1
 google-cloud-bigquery>=3.17
 scipy>=1.11
+pyyaml>=6.0                 # read the metric registry for the grounded brief
 google-genai>=1.0          # Gemini client for the in-dashboard AI Decision Brief
