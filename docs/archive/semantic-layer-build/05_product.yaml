@@ -1,0 +1,438 @@
+# =============================================================================
+# Helios Semantic Layer - Cluster 05: PRODUCT (item-level)
+# =============================================================================
+# Path: models/semantic/_build/05_product.yaml
+# Single source of truth for product / item-level metrics. Merged into the
+# production registry (models/semantic/semantic_models.yml) at compile time.
+#
+# GRAIN NOTE. Item-level metrics live at two grains:
+#   - fct_order_items (1 row / transaction_id x item line): the ONLY place
+#     purchased-item economics (item_revenue_in_usd, item quantity) exist.
+#   - fct_funnel (1 row / session): the only place a SESSION-scoped item view
+#     exists, surfaced through reached_view_item + the session's viewed-items
+#     set. Item-level VIEW occurrences come from the GA4 view_item event's
+#     items[] array (exploded), purchase occurrences from the purchase event's
+#     items[] array (exploded into fct_order_items).
+#
+# CARDINAL CAVEAT (applies to the whole cluster). GA4 item-list tracking is only
+# as complete as the merchant's dataLayer: an item that appears in a purchase
+# items[] array but was never emitted in a view_item items[] array (or vice
+# versa) breaks naive item-level conversion. Item-scoped rates therefore depend
+# on items[] view-tracking completeness, and a product viewed in session A but
+# bought in session B is invisible to any SESSION-scoped product conversion.
+# =============================================================================
+
+metrics:
+
+  # ---------------------------------------------------------------------------
+  # NAMED: product_revenue
+  # ---------------------------------------------------------------------------
+  - metric_name: product_revenue
+    label: "Product Revenue"
+    category: product
+    type: sum
+    business_definition: "Total USD revenue attributable to a product, summed across all purchased order-item lines. This is item-line merchandise value (price x quantity in USD), so it slices cleanly by item_name, item_category and item_brand and is the denominator-free building block for 'which products earn the money'."
+    sql_definition: "SUM(item_revenue_in_usd)"
+    aggregation_method: sum
+    grain: fct_order_items
+    entity: order_item
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Item-line revenue (item_revenue_in_usd) is merchandise value only: it excludes shipping and tax, and is NOT discounted/refunded. Do not expect SUM(product_revenue) to equal order-grain gross_revenue line-for-line - rounding and the item.price-vs-purchase_revenue reconciliation differ; they agree only at the grand total within tolerance."
+      - "A product with NULL or 'unknown' item_name/item_brand (common in GA4 obfuscated data) silently rolls into an '(not set)' bucket; filter or label it explicitly before ranking."
+      - "Revenue is attributed at purchase time on the order's channel/device, not the channel/device that drove the original product view (last non-direct order-scoped attribution)."
+    common_mistakes:
+      - "Summing item_revenue_in_usd at fct_orders grain - the item array is exploded in fct_order_items, so joining back to orders without dedup multiplies revenue by the number of line items."
+      - "Treating product_revenue as profit; there is no cost/COGS column in this GA4 dataset."
+      - "Comparing product_revenue across products with wildly different price points without also looking at units - one luxury sale can outrank a best-seller."
+    guardrails:
+      do_not_use_when:
+        - "You need order-level or session-level revenue - use gross_revenue (cluster 01, fct_orders) or revenue (cluster 01, fct_funnel) instead; product_revenue is item-line grain and will double count if mixed with order-grain measures."
+        - "You need profit, margin, or net-of-refund figures - none exist in this dataset."
+      misinterpretations:
+        - "'Product revenue went up' can mean more units, higher price mix, or a single large basket - decompose before concluding demand changed."
+        - "High product_revenue does not imply high product_conversion_rate; a high-AOV product can earn a lot from few buyers."
+      simpsons_paradox_risk: "Aggregate product_revenue mix can shift purely because traffic mix (channel_group/device) shifted toward higher-AOV products even if every product's own revenue fell. Always pair revenue level with rate metrics when diagnosing."
+      attribution_pitfalls: "Revenue is booked on the purchasing session's channel; cross-session product discovery (viewed via Paid Search, bought via Direct) credits Direct, understating upper-funnel channels."
+      segmentation_pitfalls: "Slicing product_revenue by item_brand x country yields many tiny cells; long-tail brands in small countries produce noisy, non-actionable totals."
+    root_cause:
+      upstream_drivers: [item_purchases, product_conversion_rate, item_views]
+      downstream_impacts: [gross_revenue, revenue, aov]
+      related_dimensions: [item_name, item_category, item_brand, channel_group]
+      decomposition_path: "Split by item_category x item_name; attribute movement to units (item_purchases) vs price/mix; then run decompose_change on channel_group x device_category to separate mix from rate; drill the largest contributor."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "SUM(product_revenue) reconciles to gross_revenue at the grand total within 0.5% (reconciles to warehouse-mcp.reconcile within 0.5%)"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0}"]
+      quality_checks:
+        - "no negative item_revenue_in_usd lines (refunds modeled separately, not as negative item revenue)"
+        - "every revenue-bearing line has a non-null item_name OR is explicitly bucketed '(not set)'"
+      anomaly_checks: ["stl-residual on daily product_revenue per top-N item_category, weekly seasonality aware"]
+      reconciliation_checks: ["sum over fct_order_items reconciles to fct_orders.gross_revenue grand total within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # NAMED: product_conversion_rate
+  # ---------------------------------------------------------------------------
+  - metric_name: product_conversion_rate
+    label: "Product Conversion Rate"
+    category: product
+    type: ratio
+    business_definition: "Of the item-level views a product received, the share that converted to item-level purchases (item_purchases / item_views). Answers 'when shoppers look at this product, how often do they buy it?' at the product level, independent of overall site conversion."
+    sql_definition: "SAFE_DIVIDE(SUM(item_purchases), SUM(item_views))"
+    aggregation_method: ratio
+    grain: fct_order_items
+    entity: order_item
+    numerator: item_purchases
+    denominator: item_views
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Numerator and denominator are OCCURRENCE counts from two different GA4 event items[] arrays (view_item vs purchase). If a merchant emits items[] on purchase but not on view_item (or lists fewer items on view), the rate is biased - completeness of items[] view tracking governs validity."
+      - "This is NOT session-scoped: a product viewed in one session and purchased in a later session still counts in both numerator and denominator over the window, but the two events need not share a session. Do not interpret it as 'sessions that viewed X and then bought X'."
+      - "Occurrence-level (not user/session deduped): a shopper who views a product five times and buys once contributes 5 to the denominator and 1 to the numerator, so heavily-browsed products look lower-converting."
+    common_mistakes:
+      - "Computing AVG of per-product rates instead of SUM(item_purchases)/SUM(item_views) - averaging ratios ignores volume weighting and inflates long-tail products."
+      - "Reporting the rate for a product with a handful of views as if it were stable - tiny denominators swing wildly."
+      - "Confusing this with view_to_cart_rate (cluster 03, session funnel) - that is session-funnel-scoped, this is item-occurrence-scoped."
+    guardrails:
+      do_not_use_when:
+        - "The product's item_views (denominator) is below the minimum-sample threshold (recommended >= 50 item views in the window) - the rate is statistically unstable and must be suppressed or flagged."
+        - "You need a session funnel rate - use view_to_cart_rate / session_conversion_rate (cluster 03) instead."
+      misinterpretations:
+        - "A low product_conversion_rate may reflect a high-consideration/expensive product browsed many times before purchase, not a broken product page."
+        - "Cross-session buying inflates the apparent disconnect between views and purchases; the metric cannot prove a given view caused a given purchase."
+      simpsons_paradox_risk: "Blending products of different price/consideration levels, or channels with different intent, can make the pooled rate move opposite to every segment. Decompose by item_category and channel_group."
+      attribution_pitfalls: "View and purchase occurrences may carry different channel/device context (viewed on mobile, bought on desktop); slicing the rate by device_category mixes the view-side and purchase-side context."
+      segmentation_pitfalls: "item_name x country x day cells collapse to near-zero denominators; enforce min-sample before drilling. Long-tail SKUs dominate the SKU list but carry no statistical signal."
+    root_cause:
+      upstream_drivers: [item_purchases, item_views]
+      downstream_impacts: [product_revenue, item_purchases]
+      related_dimensions: [item_name, item_category, item_brand, channel_group, device_category]
+      decomposition_path: "Filter to products above the min-sample item_views threshold; split by item_category then item_name; run decompose_change (mix vs rate vs interaction) over channel_group x device_category; drill the largest rate-effect product, validating items[] view-tracking completeness before concluding."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+      - "numerator item_purchases <= denominator item_views is NOT guaranteed (multi-buy / repeat views) - clamp/flag values > 1 rather than fail hard"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0, max: 1.5}"]
+      quality_checks:
+        - "products with item_views < 50 flagged low_sample and excluded from ranked output"
+        - "item_views >= item_purchases for the vast majority of products; investigate systematic inversions (likely missing view_item items[])"
+      anomaly_checks: ["stl-residual on daily product_conversion_rate for top-N products by item_views, weekly seasonality aware"]
+      reconciliation_checks: ["pooled SUM(item_purchases)/SUM(item_views) recomputed from fct_order_items + fct_funnel item views matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # NAMED: product_view_rate
+  # ---------------------------------------------------------------------------
+  - metric_name: product_view_rate
+    label: "Product View Rate"
+    category: product
+    type: ratio
+    business_definition: "Of all sessions that reached the view_item step, the share in which a given product was among the items viewed (item_view_sessions / view_item_sessions). Answers 'of shoppers who looked at any product, how many looked at THIS one?' - a product visibility / demand-share signal at session grain."
+    sql_definition: "SAFE_DIVIDE(COUNT(DISTINCT IF(item_viewed_in_session, session_key, NULL)), COUNTIF(reached_view_item))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: session
+    numerator: item_view_sessions
+    denominator: view_item_sessions
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Denominator view_item_sessions (cluster 03) is ANY session that reached view_item, not sessions that viewed this product's category - so product_view_rate is a share of all product-viewing sessions, summing across products to >100% (a session views many products)."
+      - "Numerator is session-DISTINCT: a session that views the product ten times counts once, unlike item_views (occurrence count). Do not divide item_views by view_item_sessions and expect this metric."
+      - "Depends entirely on view_item items[] completeness; products under-tagged in the dataLayer appear to have artificially low view rate."
+    common_mistakes:
+      - "Expecting product_view_rate values to sum to 1 across products - they do not, because one session can view many products (multi-membership)."
+      - "Using view_item_sessions filtered to the product's category as the denominator - the canonical denominator is the all-products view_item_sessions for cross-product comparability."
+      - "Confusing product_view_rate (session reach of a product) with product_conversion_rate (purchase efficiency of a product)."
+    guardrails:
+      do_not_use_when:
+        - "You want absolute product demand - use item_view_sessions or item_views directly; the rate normalizes out total traffic and hides volume collapse."
+        - "view_item_sessions in the slice is tiny (e.g. a narrow day x country cell) - the share is unstable."
+      misinterpretations:
+        - "A rising product_view_rate with falling traffic can still mean fewer absolute viewers; always read alongside item_view_sessions."
+        - "High view rate, low product_conversion_rate signals a browsing-but-not-buying product (price/availability/merchandising), not a discovery problem."
+      simpsons_paradox_risk: "Product view share can rise in aggregate while falling within every channel if traffic mix shifts toward channels that disproportionately surface the product (e.g. a Paid Social campaign featuring it). Decompose by channel_group."
+      attribution_pitfalls: "The viewing session's channel_group is the session-scoped channel; merchandising-driven views (on-site recommendations) are not distinguishable from channel-driven views."
+      segmentation_pitfalls: "Slicing by item_name x day fragments the denominator; keep the denominator at the comparable all-products level and apply min-sample on view_item_sessions."
+    root_cause:
+      upstream_drivers: [item_view_sessions, view_item_sessions]
+      downstream_impacts: [product_conversion_rate, product_revenue, add_to_cart_sessions]
+      related_dimensions: [item_name, item_category, item_brand, channel_group, device_category]
+      decomposition_path: "Split by item_category x item_name; compare item_view_sessions trend vs the view_item_sessions base; run decompose_change over channel_group x device_category to separate traffic-mix effects from genuine demand-share shifts; drill the product with the largest share move."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+      - "SUM over all products of item_view_sessions >= view_item_sessions (multi-membership), so individual product_view_rate <= 1 but products do not sum to 1"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0, max: 1}"]
+      quality_checks:
+        - "item_view_sessions <= view_item_sessions for every product (distinct-session subset invariant)"
+        - "products with view_item_sessions base below min-sample flagged low_sample"
+      anomaly_checks: ["stl-residual on daily product_view_rate for top-N products by item_view_sessions, weekly seasonality aware"]
+      reconciliation_checks: ["recompute from fct_funnel item-view session flags matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # NAMED: product_attach_rate
+  # ---------------------------------------------------------------------------
+  - metric_name: product_attach_rate
+    label: "Product Attach Rate"
+    category: product
+    type: ratio
+    business_definition: "Share of all orders that contain a given product (orders_with_item / orders). Answers 'how often does this product show up in a basket?' - the classic attach / basket-penetration metric used to find anchor and frequently-bundled products. Denominator is the company-wide orders count (named metric, cluster 01)."
+    sql_definition: "SAFE_DIVIDE(COUNT(DISTINCT IF(item_in_order, order_key, NULL)), COUNT(DISTINCT order_key))"
+    aggregation_method: ratio
+    grain: fct_order_items
+    entity: order_item
+    numerator: orders_with_item
+    denominator: orders
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Denominator is orders (cluster 01, fct_orders, count_distinct order_key) - ALL orders in the window, not just orders in the product's category. Attach rate is therefore basket penetration across the entire order base; it sums across products to >100% because an order holds multiple products."
+      - "Order-distinct, not quantity-weighted: an order with three units of the product counts once. Use units measures, not attach rate, for quantity demand."
+      - "Depends on purchase items[] completeness; if line items are dropped from the purchase event the product is undercounted in orders_with_item."
+    common_mistakes:
+      - "Using order-item ROW count in the numerator instead of DISTINCT order_key - multi-line or multi-unit orders would overstate attach."
+      - "Dividing by orders that contain the product's category rather than all orders - that yields category penetration, a different metric; the canonical denominator is the global orders count."
+      - "Reading attach rate as conversion - it conditions on having purchased, not on having viewed."
+    guardrails:
+      do_not_use_when:
+        - "Total orders in the slice are few (narrow day x country cell) - attach rate is unstable on tiny order bases; apply min-sample on orders."
+        - "You need cross-sell lift between two specific products - attach rate is single-product penetration, not pairwise affinity; use a market-basket/association analysis instead."
+      misinterpretations:
+        - "A long-tail SKU will show a near-zero attach rate by construction (few orders contain it); low attach is not necessarily underperformance - compare within category."
+        - "High attach rate can simply mean the product is a default/cheap add-on, not a revenue driver; pair with product_revenue."
+      simpsons_paradox_risk: "Pooled attach rate can rise while falling in every channel if order mix shifts toward channels whose baskets favor the product. Decompose by channel_group and item_category."
+      attribution_pitfalls: "Attach is measured on the order's channel/device; it says nothing about how the attached product was discovered (no view-side linkage)."
+      segmentation_pitfalls: "item_name x channel_group x day fragments the orders denominator into single-digit baskets; enforce min-sample (recommended >= 100 orders in the denominator) before ranking attach."
+    root_cause:
+      upstream_drivers: [orders_with_item, orders]
+      downstream_impacts: [product_revenue, aov, items_per_transaction]
+      related_dimensions: [item_name, item_category, item_brand, channel_group]
+      decomposition_path: "Split by item_category x item_name over a sufficiently large orders base; run decompose_change on channel_group to separate order-mix from genuine penetration change; drill the products whose orders_with_item moved most relative to the stable orders denominator."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+      - "orders_with_item <= orders for every product (subset-of-orders invariant)"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0, max: 1}"]
+      quality_checks:
+        - "orders_with_item <= orders for all products"
+        - "products in denominator slices with orders < 100 flagged low_sample"
+      anomaly_checks: ["stl-residual on weekly product_attach_rate for top-N products by orders_with_item, weekly seasonality aware"]
+      reconciliation_checks: ["distinct order_key recompute from fct_order_items matches fct_orders order count within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ===========================================================================
+  # SUPPORTING MEASURES (defined in THIS cluster; category: supporting)
+  # ===========================================================================
+
+  # ---- item_views (item-level view_item occurrences) -----------------------
+  - metric_name: item_views
+    label: "Item Views (occurrences)"
+    category: supporting
+    type: count
+    business_definition: "Count of item-level view_item occurrences: every appearance of the product in a view_item event's items[] array, exploded to one row per item-view. Occurrence-level (NOT session-distinct). Denominator building block for product_conversion_rate."
+    sql_definition: "COUNT(1)"
+    aggregation_method: count
+    grain: fct_order_items
+    entity: order_item
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Occurrence count, not distinct sessions or users - a single session viewing the product repeatedly inflates this; use item_view_sessions for session reach."
+      - "Sourced from the view_item event items[] array; entirely dependent on dataLayer view-list completeness. Products absent from items[] on view are invisible here."
+      - "Modeled at item-line grain alongside purchases; the physical source is the exploded view_item items[] joined into the item-level fact (see cluster build notes)."
+    common_mistakes:
+      - "Treating item_views as unique viewers - it is raw occurrences."
+      - "Comparing item_views to view_item_sessions directly - one is item-occurrence, the other is session-count at fct_funnel grain."
+    guardrails:
+      do_not_use_when:
+        - "You need distinct viewing sessions (use item_view_sessions) or distinct viewers (not modeled per-product)."
+      misinterpretations:
+        - "High item_views with low item_purchases is a browse-heavy product, not necessarily a failing one."
+      simpsons_paradox_risk: "Not a rate; mix effects appear only when used as a denominator in product_conversion_rate."
+      attribution_pitfalls: "View occurrences carry the viewing context's channel/device, which may differ from the purchase context."
+      segmentation_pitfalls: "Long-tail products yield tiny occurrence counts; suppress below min-sample when used as a rate denominator."
+    root_cause:
+      upstream_drivers: [view_item_sessions]
+      downstream_impacts: [product_conversion_rate]
+      related_dimensions: [item_name, item_category, item_brand, channel_group]
+      decomposition_path: "Used as the denominator of product_conversion_rate; decompose alongside item_purchases by item_category x item_name."
+    agents: [Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0}"]
+      quality_checks: ["every counted row carries a non-null item_name or explicit '(not set)' bucket"]
+      anomaly_checks: ["stl-residual on daily item_views for top-N products, weekly seasonality aware"]
+      reconciliation_checks: ["recompute from exploded view_item items[] matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---- item_purchases (item-level purchase occurrences) --------------------
+  - metric_name: item_purchases
+    label: "Item Purchases (occurrences)"
+    category: supporting
+    type: count
+    business_definition: "Count of item-level purchase occurrences: every appearance of the product in a purchase event's items[] array (one row per purchased item line in fct_order_items). Occurrence-level, NOT distinct orders. Numerator building block for product_conversion_rate."
+    sql_definition: "COUNT(1)"
+    aggregation_method: count
+    grain: fct_order_items
+    entity: order_item
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Counts purchased item LINES, not quantity (a line may carry quantity > 1) and not distinct orders (use orders_with_item for basket penetration)."
+      - "Sourced from the purchase event items[] array; missing line items in the dataLayer undercount this."
+      - "Pairs with item_views (also occurrence-level) to form product_conversion_rate; the two events need not share a session, so the rate is cross-session by construction."
+    common_mistakes:
+      - "Equating item_purchases with units sold (quantity-weighted) or with orders containing the item (order-distinct) - both are different measures."
+      - "Summing item_purchases to compare against transactions/orders - a single order contributes many item lines."
+    guardrails:
+      do_not_use_when:
+        - "You need distinct orders containing the product (use orders_with_item) or unit quantity (use units measures)."
+      misinterpretations:
+        - "More item_purchases than item_views for a product signals missing view_item items[] tracking, not a >100% real conversion."
+      simpsons_paradox_risk: "Not a rate; mix effects surface only via product_conversion_rate."
+      attribution_pitfalls: "Purchase occurrences carry the purchasing order's channel/device, decoupled from the view-side channel."
+      segmentation_pitfalls: "Sparse for long-tail products; enforce min-sample on the paired denominator (item_views) before computing rates."
+    root_cause:
+      upstream_drivers: [item_views, orders_with_item]
+      downstream_impacts: [product_conversion_rate, product_revenue]
+      related_dimensions: [item_name, item_category, item_brand, channel_group]
+      decomposition_path: "Numerator of product_conversion_rate; decompose with item_views by item_category x item_name and by channel_group x device_category."
+    agents: [Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0}"]
+      quality_checks: ["count of purchase item lines reconciles to fct_order_items row count for the slice"]
+      anomaly_checks: ["stl-residual on daily item_purchases for top-N products, weekly seasonality aware"]
+      reconciliation_checks: ["recompute from fct_order_items matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---- item_view_sessions (distinct sessions viewing the item) -------------
+  - metric_name: item_view_sessions
+    label: "Item-View Sessions"
+    category: supporting
+    type: count
+    business_definition: "Distinct sessions (session_key) in which the product appeared at least once in a view_item event's items[] array. Session-distinct (deduped within a session), unlike item_views. Numerator building block for product_view_rate."
+    sql_definition: "COUNT(DISTINCT IF(item_viewed_in_session, session_key, NULL))"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Distinct sessions, not occurrences and not users - a session that viewed the product five times counts once; a user across two sessions counts twice."
+      - "Requires the session's viewed-items set to be materialized on fct_funnel from the session's view_item items[]; completeness mirrors item_views' dataLayer dependency."
+      - "Multi-membership: one session can be an item_view_session for many products, so summing across products exceeds view_item_sessions."
+    common_mistakes:
+      - "Using item_views (occurrences) where item_view_sessions (distinct sessions) is required for product_view_rate - the denominator view_item_sessions is session-distinct, so the numerator must be too."
+      - "Assuming item_view_sessions for a product cannot exceed view_item_sessions - it cannot (subset), but the per-product values do not partition the base."
+    guardrails:
+      do_not_use_when:
+        - "You need raw view demand (use item_views) or distinct viewers (not modeled per-product)."
+      misinterpretations:
+        - "Session reach is not purchase intent; pair with product_conversion_rate."
+      simpsons_paradox_risk: "Not a rate; mix effects appear via product_view_rate."
+      attribution_pitfalls: "Carries the viewing session's channel_group/device_category."
+      segmentation_pitfalls: "Fragments quickly under item_name x day; apply min-sample on the view_item_sessions base."
+    root_cause:
+      upstream_drivers: [view_item_sessions, item_views]
+      downstream_impacts: [product_view_rate, product_conversion_rate]
+      related_dimensions: [item_name, item_category, item_brand, channel_group, device_category]
+      decomposition_path: "Numerator of product_view_rate; compare against the view_item_sessions base across channel_group x device_category."
+    agents: [Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "item_view_sessions <= view_item_sessions for every product"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0}"]
+      quality_checks: ["item_view_sessions <= view_item_sessions invariant holds per product"]
+      anomaly_checks: ["stl-residual on daily item_view_sessions for top-N products, weekly seasonality aware"]
+      reconciliation_checks: ["distinct session recompute from fct_funnel viewed-items flags matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---- orders_with_item (distinct orders containing the item) --------------
+  - metric_name: orders_with_item
+    label: "Orders Containing Item"
+    category: supporting
+    type: count
+    business_definition: "Distinct orders (order_key) whose purchase items[] array contains the product. Order-distinct (an order with multiple units/lines of the product counts once). Numerator building block for product_attach_rate; the denominator is the named metric orders (cluster 01)."
+    sql_definition: "COUNT(DISTINCT IF(item_in_order, order_key, NULL))"
+    aggregation_method: count_distinct
+    grain: fct_order_items
+    entity: order_item
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [item_name, item_category, item_brand, channel_group, device_category, country, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Distinct orders, not item lines (use item_purchases) and not units (use units measures) - basket presence only."
+      - "Subset of orders: orders_with_item <= orders always; per-product values do not partition the order base (an order can contain many products)."
+      - "Depends on purchase items[] completeness; dropped line items undercount the product's basket presence."
+    common_mistakes:
+      - "Counting item-line rows instead of DISTINCT order_key - overstates orders_with_item for multi-line baskets."
+      - "Pairing orders_with_item with a category-filtered orders denominator - product_attach_rate uses the GLOBAL orders count (cluster 01)."
+    guardrails:
+      do_not_use_when:
+        - "You need item-line or unit counts (use item_purchases / units measures) rather than basket presence."
+      misinterpretations:
+        - "A small orders_with_item for a niche product is expected; judge attach within the product's category."
+      simpsons_paradox_risk: "Not a rate; mix effects surface via product_attach_rate."
+      attribution_pitfalls: "Carries the order's channel/device, with no view-side linkage."
+      segmentation_pitfalls: "Sparse under fine slices; enforce min-sample on the orders denominator before computing attach."
+    root_cause:
+      upstream_drivers: [item_purchases, orders]
+      downstream_impacts: [product_attach_rate, product_revenue]
+      related_dimensions: [item_name, item_category, item_brand, channel_group]
+      decomposition_path: "Numerator of product_attach_rate against the stable orders denominator; decompose by item_category x item_name and channel_group."
+    agents: [Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "orders_with_item <= orders for every product"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min: 0}"]
+      quality_checks: ["orders_with_item <= orders invariant holds per product"]
+      anomaly_checks: ["stl-residual on weekly orders_with_item for top-N products, weekly seasonality aware"]
+      reconciliation_checks: ["distinct order_key recompute from fct_order_items matches semantic value within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"

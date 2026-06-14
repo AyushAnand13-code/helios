@@ -1,0 +1,636 @@
+# =============================================================================
+# Helios — Semantic Layer Registry  (artifact A5.1, the governance keystone ★★)
+# =============================================================================
+# Canonical path: models/semantic/semantic_models.yml
+# `semantic-mcp` MUST load THIS file (mcp_servers.yaml -> registry: ./models/semantic/semantic_models.yml).
+# This is the SINGLE SOURCE OF TRUTH for every governed metric and dimension.
+# The LLM never authors SQL; it passes canonical names, and semantic-mcp.build_query
+# composes validated SQL strictly from the definitions below (Bible §14).
+#
+# FIELD CONTRACT (Bible §14.1)
+#   metric:    name,label,description,type{count|sum|ratio|derived},entity{session|user|order|order_item},
+#              grain (logical key in `grains:` below), agg{count_distinct|sum|countif} (count/sum only),
+#              sql (count/sum additive expr), numerator+denominator (ratio), expr (derived, {token}=metric name),
+#              filters[], format{integer|percent_1dp|usd|decimal_2}, dimensions[] (whitelist), owner, version
+#   dimension: name,label,description,type{categorical|temporal|boolean},entity,sql,format,owner,version
+#
+# REFERENTIAL INTEGRITY (enforced at registry compile time, Bible §14.4-14.5):
+#   - every numerator/denominator/expr {token} must resolve to a metric defined here
+#   - every name in a metric's `dimensions` whitelist must be a dimension defined here
+#   - unknown names are a HARD FAIL (anti-hallucination; rule G5). CI compiles this and fails on any dangling ref.
+#
+# ARCHITECTURAL RULING — WIDE FACTS. Fact tables are built denormalized (Kimball wide-fact pattern):
+#   fct_funnel / fct_sessions carry the full SESSION descriptive dimension set (device_category,
+#   operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page,
+#   is_new_user, ga_session_number) alongside reached_* flags and session_revenue; fct_orders/
+#   fct_order_items carry their order/item descriptive dims. This lets the semantic layer slice any
+#   metric without runtime joins. (Bible §8.3 lists a minimal column set on fct_funnel; the marts MUST
+#   expose the full session dims on fct_funnel/fct_sessions for the diagnosis tree to drill all dimensions.)
+#
+# CONVENTIONS (mirror CLAUDE.md / Bible Reference Card):
+#   - session_key = TO_HEX(MD5(CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING))))
+#   - reached_* flags are max-downstream (monotonic): reached_X = reached step X OR any later stage
+#   - engaged_session = session_engaged='1' OR engagement_time_msec >= 10000
+#   - rates computed as SUM(num)/SUM(den) after grouping (Simpson's-paradox defense); money uses *_in_usd only
+#   - revenue (session-attributed, grain fct_funnel) and gross_revenue (order grain) reconcile at grand total
+# =============================================================================
+
+version: 2
+
+metadata:
+  registry_version: "1.0.0"
+  owner: analytics-eng
+  source_dataset: bigquery-public-data.ga4_obfuscated_sample_ecommerce
+  marts_project: helios
+  notes: >
+    Headline metrics match the Bible Canonical Reference Card exactly. Entries flagged
+    "supporting measure" (units_sold, item_revenue) are governed building blocks that let
+    ratios resolve and item-level dimensions be sliced; they are queryable but not headline KPIs.
+
+# Logical grain -> physical relation. semantic-mcp.build_query resolves FROM GRAIN[metric.grain].
+grains:
+  fct_funnel:       helios.marts.fct_funnel        # 1 row / session; reached_* flags + session_revenue + wide session dims
+  fct_sessions:     helios.marts.fct_sessions      # 1 row / session; engagement + wide session dims
+  fct_orders:       helios.marts.fct_orders        # 1 row / transaction_id; revenue measures + order dims
+  fct_order_items:  helios.marts.fct_order_items   # 1 row / transaction_id x item line; item dims
+  fct_daily_funnel: helios.marts.fct_daily_funnel  # pre-agg day x dim cell (Monitor/Decompose/eval feed)
+
+# -----------------------------------------------------------------------------
+# METRICS
+# -----------------------------------------------------------------------------
+metrics:
+
+  # ---- VOLUME (session grain) ----------------------------------------------
+  - name: sessions
+    label: Sessions
+    description: Distinct (user_pseudo_id, ga_session_id) pairs in the window.
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: count_distinct
+    sql: "session_key"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.2.0
+
+  - name: users
+    label: Users
+    description: Distinct user_pseudo_id (device/cookie key; cross-device stitching not possible).
+    type: count
+    entity: user
+    grain: fct_funnel
+    agg: count_distinct
+    sql: "user_pseudo_id"
+    filters: []
+    format: integer
+    dimensions: [device_category, country, channel_group, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: new_users
+    label: New Users
+    description: Distinct users whose session is their first (ga_session_number = 1).
+    type: count
+    entity: user
+    grain: fct_funnel
+    agg: count_distinct
+    sql: "IF(is_new_user, user_pseudo_id, NULL)"
+    filters: []
+    format: integer
+    dimensions: [device_category, country, channel_group, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: returning_users
+    label: Returning Users
+    description: Distinct users with at least one non-first session in the window (cookie-based; double-counts cookie churn).
+    type: count
+    entity: user
+    grain: fct_funnel
+    agg: count_distinct
+    sql: "IF(NOT is_new_user, user_pseudo_id, NULL)"
+    filters: []
+    format: integer
+    dimensions: [device_category, country, channel_group, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: engaged_sessions
+    label: Engaged Sessions
+    description: Sessions with session_engaged='1' OR engagement_time_msec >= 10000 (GA4 engaged-session definition).
+    type: count
+    entity: session
+    grain: fct_sessions
+    agg: countif
+    sql: "engaged_session"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: view_item_sessions
+    label: View-Item Sessions
+    description: Sessions that reached the view_item step (max-downstream).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_view_item"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: add_to_cart_sessions
+    label: Add-to-Cart Sessions
+    description: Sessions that reached the add_to_cart step (max-downstream).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_add_to_cart"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: begin_checkout_sessions
+    label: Begin-Checkout Sessions
+    description: Sessions that reached the begin_checkout step (max-downstream).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_begin_checkout"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: add_shipping_info_sessions
+    label: Add-Shipping-Info Sessions
+    description: Sessions that reached the add_shipping_info step (max-downstream).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_add_shipping_info"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: add_payment_info_sessions
+    label: Add-Payment-Info Sessions
+    description: Sessions that reached the add_payment_info step (max-downstream).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_add_payment_info"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: purchasing_sessions
+    label: Purchasing Sessions
+    description: Sessions that reached the purchase step (fired purchase).
+    type: count
+    entity: session
+    grain: fct_funnel
+    agg: countif
+    sql: "reached_purchase"
+    filters: []
+    format: integer
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.1.0
+
+  # ---- ENGAGEMENT -----------------------------------------------------------
+  - name: engagement_rate
+    label: Engagement Rate
+    description: engaged_sessions / sessions.
+    type: ratio
+    entity: session
+    grain: fct_sessions
+    numerator: engaged_sessions
+    denominator: sessions
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---- FUNNEL RATES (session grain) ----------------------------------------
+  - name: session_conversion_rate
+    label: Session Conversion Rate
+    description: Share of sessions that purchased (purchasing_sessions / sessions).
+    type: ratio
+    entity: session
+    grain: fct_funnel
+    numerator: purchasing_sessions
+    denominator: sessions
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 2.0.0
+
+  - name: view_to_cart_rate
+    label: View-to-Cart Rate
+    description: add_to_cart_sessions / view_item_sessions.
+    type: ratio
+    entity: session
+    grain: fct_funnel
+    numerator: add_to_cart_sessions
+    denominator: view_item_sessions
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: cart_to_checkout_rate
+    label: Cart-to-Checkout Rate
+    description: begin_checkout_sessions / add_to_cart_sessions.
+    type: ratio
+    entity: session
+    grain: fct_funnel
+    numerator: begin_checkout_sessions
+    denominator: add_to_cart_sessions
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: checkout_to_purchase_rate
+    label: Checkout-to-Purchase Rate
+    description: purchasing_sessions / begin_checkout_sessions (spans the macro begin_checkout -> purchase step).
+    type: ratio
+    entity: session
+    grain: fct_funnel
+    numerator: purchasing_sessions
+    denominator: begin_checkout_sessions
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: cart_abandonment_rate
+    label: Cart Abandonment Rate
+    description: Share of carts that did not purchase = 1 - (purchasing_sessions / add_to_cart_sessions).
+    type: derived
+    entity: session
+    grain: fct_funnel
+    expr: "1 - SAFE_DIVIDE({purchasing_sessions}, {add_to_cart_sessions})"
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: checkout_abandonment_rate
+    label: Checkout Abandonment Rate
+    description: Share of checkouts that did not purchase = 1 - (purchasing_sessions / begin_checkout_sessions).
+    type: derived
+    entity: session
+    grain: fct_funnel
+    expr: "1 - SAFE_DIVIDE({purchasing_sessions}, {begin_checkout_sessions})"
+    filters: []
+    format: percent_1dp
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---- REVENUE --------------------------------------------------------------
+  - name: transactions
+    label: Transactions
+    description: Distinct purchase transactions (deduped transaction_id).
+    type: count
+    entity: order
+    grain: fct_orders
+    agg: count_distinct
+    sql: "order_key"
+    filters: []
+    format: integer
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: revenue
+    label: Revenue
+    description: Session-attributed purchase revenue (SUM session_revenue, i.e. purchase_revenue_in_usd deduped per transaction). Reconciles to gross_revenue at the grand total. Used for RPS/ARPU.
+    type: sum
+    entity: session
+    grain: fct_funnel
+    agg: sum
+    sql: "session_revenue"
+    filters: []
+    format: usd
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: gross_revenue
+    label: Gross Revenue
+    description: SUM purchase_revenue_in_usd at order grain (excludes shipping and tax).
+    type: sum
+    entity: order
+    grain: fct_orders
+    agg: sum
+    sql: "gross_revenue"
+    filters: []
+    format: usd
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: net_revenue
+    label: Net Revenue
+    description: gross_revenue minus refund_value_in_usd at order grain.
+    type: sum
+    entity: order
+    grain: fct_orders
+    agg: sum
+    sql: "net_revenue"
+    filters: []
+    format: usd
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: units_sold
+    label: Units Sold
+    description: "Supporting measure: SUM total_item_quantity at order grain (units across all orders)."
+    type: sum
+    entity: order
+    grain: fct_orders
+    agg: sum
+    sql: "total_item_quantity"
+    filters: []
+    format: integer
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: aov
+    label: Average Order Value (AOV)
+    description: gross_revenue / transactions (merchandise value per order; excludes shipping/tax).
+    type: ratio
+    entity: order
+    grain: fct_orders
+    numerator: gross_revenue
+    denominator: transactions
+    filters: []
+    format: usd
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: items_per_transaction
+    label: Items per Transaction
+    description: units_sold / transactions.
+    type: ratio
+    entity: order
+    grain: fct_orders
+    numerator: units_sold
+    denominator: transactions
+    filters: []
+    format: decimal_2
+    dimensions: [channel_group, source, medium, campaign, device_category, country, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: item_revenue
+    label: Item Revenue
+    description: "Supporting measure: SUM item_revenue_in_usd at item-line grain; pairs with item_category/item_name."
+    type: sum
+    entity: order_item
+    grain: fct_order_items
+    agg: sum
+    sql: "item_revenue_in_usd"
+    filters: []
+    format: usd
+    dimensions: [item_category, item_name, channel_group, device_category, country, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---- EFFICIENCY (session grain) ------------------------------------------
+  - name: revenue_per_session
+    label: Revenue per Session (RPS)
+    description: revenue / sessions; equals session_conversion_rate * aov.
+    type: derived
+    entity: session
+    grain: fct_funnel
+    expr: "SAFE_DIVIDE({revenue}, {sessions})"
+    filters: []
+    format: usd
+    dimensions: [device_category, operating_system, browser, country, region, channel_group,
+                 source, medium, campaign, landing_page, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: revenue_per_user
+    label: Revenue per User (ARPU)
+    description: revenue / users (denominator is all users in the window, not just purchasers).
+    type: derived
+    entity: user
+    grain: fct_funnel
+    expr: "SAFE_DIVIDE({revenue}, {users})"
+    filters: []
+    format: usd
+    dimensions: [device_category, country, channel_group, is_new_user, day, week]
+    owner: analytics-eng
+    version: 1.0.0
+
+# -----------------------------------------------------------------------------
+# DIMENSIONS
+# -----------------------------------------------------------------------------
+dimensions:
+
+  - name: device_category
+    label: Device Category
+    description: device.category of the session (desktop / mobile / tablet).
+    type: categorical
+    entity: session
+    sql: "device_category"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: operating_system
+    label: Operating System
+    description: device.operating_system of the session.
+    type: categorical
+    entity: session
+    sql: "operating_system"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: browser
+    label: Browser
+    description: device.web_info.browser of the session.
+    type: categorical
+    entity: session
+    sql: "browser"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: country
+    label: Country
+    description: geo.country of the session.
+    type: categorical
+    entity: session
+    sql: "country"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: region
+    label: Region
+    description: geo.region of the session.
+    type: categorical
+    entity: session
+    sql: "region"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: channel_group
+    label: Channel Group
+    description: GA4-style default channel grouping (10 groups) from session-scoped source/medium. Resolved via the channel_group_case() macro / dim_channels; never re-derived ad hoc.
+    type: categorical
+    entity: session
+    sql: "channel_group"
+    format: string
+    owner: analytics-eng
+    version: 1.3.0
+
+  - name: source
+    label: Source
+    description: Session-scoped traffic source (event_params.source; traffic_source first-touch fallback).
+    type: categorical
+    entity: session
+    sql: "source"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: medium
+    label: Medium
+    description: Session-scoped traffic medium (event_params.medium; traffic_source first-touch fallback).
+    type: categorical
+    entity: session
+    sql: "medium"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: campaign
+    label: Campaign
+    description: Session-scoped campaign (event_params.campaign).
+    type: categorical
+    entity: session
+    sql: "campaign"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: landing_page
+    label: Landing Page
+    description: First page_location of the session (earliest-timestamp event carrying one).
+    type: categorical
+    entity: session
+    sql: "landing_page"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: item_category
+    label: Item Category
+    description: items.item_category at order-item line grain.
+    type: categorical
+    entity: order_item
+    sql: "item_category"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: item_name
+    label: Item Name
+    description: items.item_name at order-item line grain.
+    type: categorical
+    entity: order_item
+    sql: "item_name"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: is_new_user
+    label: Is New User
+    description: TRUE if the session is the user's first (ga_session_number = 1).
+    type: boolean
+    entity: session
+    sql: "is_new_user"
+    format: boolean
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: session_number_bucket
+    label: Session Number Bucket
+    description: Bucketed session ordinal for the user (1 / 2-5 / 6+).
+    type: categorical
+    entity: session
+    sql: "CASE WHEN ga_session_number = 1 THEN '1' WHEN ga_session_number BETWEEN 2 AND 5 THEN '2-5' ELSE '6+' END"
+    format: string
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: day
+    label: Day
+    description: Calendar day of the event/session (partition column event_date).
+    type: temporal
+    entity: session
+    sql: "event_date"
+    format: date
+    owner: analytics-eng
+    version: 1.0.0
+
+  - name: week
+    label: Week
+    description: ISO week (Monday) of the event/session.
+    type: temporal
+    entity: session
+    sql: "DATE_TRUNC(event_date, WEEK(MONDAY))"
+    format: date
+    owner: analytics-eng
+    version: 1.0.0

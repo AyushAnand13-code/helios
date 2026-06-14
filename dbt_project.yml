@@ -1,0 +1,108 @@
+name: helios
+version: '1.0.0'
+config-version: 2
+require-dbt-version: '>=1.7.0'
+
+profile: helios
+
+# TEMPORARY (until M5): scan only the built layers, NOT models/semantic/.
+# The registry models/semantic/semantic_layer.yaml is a custom (non-dbt) YAML and
+# would fail `dbt parse`. Restore to ['models'] at M5 once metrics__schema.yml makes
+# models/semantic/ dbt-valid. The registry file itself is NOT moved (path stays frozen).
+model-paths: ['models/staging', 'models/intermediate', 'models/marts']
+seed-paths: ['seeds']
+macro-paths: ['macros']
+snapshot-paths: ['snapshots']
+test-paths: ['tests']
+analysis-paths: ['analyses']
+
+clean-targets: ['target', 'dbt_packages']
+
+vars:
+  # Build window — matches the static public sample; prod overrides via --vars.
+  ga4_start_date: '2020-11-01'
+  ga4_end_date:   '2021-01-31'
+  # Late-arrival lookback for incremental insert_overwrite.
+  incremental_lookback_days: 3
+  # Engaged-session threshold (msec); keeps the rule in one place.
+  engagement_time_threshold_msec: 10000
+
+# Surrogate-key salt + dispatch so dbt_utils macros resolve on BigQuery first.
+dispatch:
+  - macro_namespace: dbt_utils
+    search_order: ['helios', 'dbt_utils']
+
+models:
+  +persist_docs:
+    relation: true
+    columns: true
+
+  helios:
+    staging:
+      +materialized: view
+      +group: staging
+      +access: private              # nothing outside staging may ref a stg_ model
+      +tags: ['staging', 'ga4']
+      +schema: staging
+
+    intermediate:
+      +materialized: ephemeral       # inlined; never exposed to BI
+      +group: intermediate
+      +access: private
+      +tags: ['intermediate', 'ga4']
+
+    marts:
+      +schema: marts
+      core:
+        +materialized: incremental
+        +incremental_strategy: insert_overwrite
+        +partition_by:
+          field: event_date
+          data_type: date
+          granularity: day
+        +cluster_by: ['device_category', 'channel_group']
+        # STATIC-SAMPLE RECONCILIATION: relaxed from `true` so dbt's own tests
+        # (unique/not_null/relationships/reconcile) can query these marts without a
+        # date predicate on the frozen 3-month sample. Set back to `true` for prod
+        # (it's the full-table-scan cost guard there). Partitioning itself is unchanged.
+        +require_partition_filter: false
+        +on_schema_change: append_new_columns
+        +group: marts
+        +access: public               # the semantic layer + exposures consume these
+        +tags: ['marts', 'core']
+        # Dims are small + non-partitioned: override to table.
+        dim_users:    { +materialized: table, +require_partition_filter: false }
+        dim_items:    { +materialized: table, +require_partition_filter: false }
+        dim_channels: { +materialized: table, +require_partition_filter: false }
+        dim_date:     { +materialized: table, +require_partition_filter: false }
+
+      finance:
+        +materialized: table
+        +group: marts
+        +access: public
+        +tags: ['marts', 'finance']
+
+      growth:
+        +materialized: table
+        +group: marts
+        +access: public
+        +tags: ['marts', 'growth']
+
+    semantic:
+      +materialized: view
+      +group: marts
+      +access: public
+      +tags: ['semantic']
+
+seeds:
+  helios:
+    channel_group_mapping:
+      +column_types:
+        source: string
+        medium: string
+        channel_group: string
+
+snapshots:
+  helios:
+    +target_schema: snapshots
+    +tags: ['snapshot']

@@ -1,0 +1,26 @@
+# models/staging/src_ga4.yml
+version: 2
+
+sources:
+  - name: src_ga4
+    database: bigquery-public-data
+    schema: ga4_obfuscated_sample_ecommerce
+    description: >
+      Raw GA4 BigQuery export (date-sharded events_YYYYMMDD). The PUBLIC SAMPLE
+      is static/historical (2020-11-01..2021-01-31); in PRODUCTION this is the
+      live daily export landing one shard per day.
+    # PRODUCTION freshness SLA. On the static sample this always trips because
+    # the newest shard is historical, so we override loaded_at_field below and
+    # rely on a date-bounded singular test instead of dbt source freshness.
+    freshness:
+      warn_after: {count: 36, period: hour}
+      error_after: {count: 48, period: hour}
+    # _TABLE_SUFFIX is 'YYYYMMDD'; parse it to a timestamp for freshness.
+    loaded_at_field: "parse_timestamp('%Y%m%d', _table_suffix)"
+    tables:
+      - name: events
+        identifier: "events_*"   # wildcard over the date shards
+        description: One row per GA4 event; partitioned/sharded by event date.
+        # On the sample, override to skip freshness (data is intentionally old):
+        # freshness: null
+        loaded_at_field: "parse_timestamp('%Y%m%d', _table_suffix)"

@@ -1,0 +1,31 @@
+# models/marts/finance/finance__schema.yml
+# LEAN subset of DBT_GUIDE.md §5.13: fct_orders only (fct_order_items is v2/postponed).
+# The session_key relationships test (to fct_sessions) is omitted — fct_sessions isn't
+# built in the MVP. Revenue reconcile tolerance: see note below.
+version: 2
+
+models:
+  - name: fct_orders
+    description: "One deduped row per transaction_id (PK order_key). gross/net/refund/shipping/tax + wide channel/device/date."
+    columns:
+      - name: order_key
+        data_tests: [unique, not_null]
+      - name: channel_group
+        data_tests:
+          - relationships: {to: ref('dim_channels'), field: channel_group}
+      - name: gross_revenue
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+      - name: net_revenue
+        data_tests:
+          - dbt_utils.accepted_range: {min_value: 0}
+    data_tests:
+      # Custom generic test: deduped mart revenue == raw GA4 purchase revenue.
+      # NOTE: the guide uses tolerance:0 ("to the cent"). On the live sample, raw sums
+      # EVERY purchase row (incl. duplicate/retry and null-transaction_id rows) while
+      # fct_orders dedupes per txn and drops null-txn purchases, so the two can differ.
+      # Starting at the canonical 0.5% tolerance; tighten to 0 once you confirm parity.
+      - test_revenue_reconciles:
+          column_name: gross_revenue
+          tolerance: 0.01

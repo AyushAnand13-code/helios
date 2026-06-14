@@ -1,0 +1,179 @@
+- scenario_id: S027
+  title: "Paid Social x mobile view-to-cart: rate decay compounded by share growth"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1027
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate fell ~8% over the eval window (29.0% -> 26.7%) while Paid Social mobile sessions grew their share of view_item_sessions; overall add_to_cart_sessions down ~6%."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Paid Social", device_category: "mobile"}
+    rate_multiplier: 0.78
+    volume_multiplier: 1.45
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social", device_category: "mobile"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.006, rate: -0.014, interaction: -0.003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "The 2.3pt aggregate view_to_cart_rate drop decomposes into three pieces: a behavior (rate) component of -0.014 in the Paid Social mobile cell (that cell's add_to_cart_sessions/view_item_sessions fell ~22%), a mix component of -0.006 because Paid Social mobile (a structurally low-converting cell) grew its share of view_item_sessions ~45%, and a -0.003 interaction (the enlarged share amplifies the rate decay). Rate dominates and is the actionable part; mix is an acquisition-volume effect, not in-segment behavior. Reconciles to the aggregate; significant (p<0.05)."
+  expected_recommendation: "Target the rate component: A/B test a streamlined mobile product-detail-to-cart flow (sticky add-to-cart button, default variant pre-selection) for Paid Social mobile landing traffic. Primary: view_to_cart_rate; guardrails: add_to_cart_sessions, cart_abandonment_rate, net_revenue. Size via power_analysis. Separately flag the mix shift to acquisition: the Paid Social mobile share surge dilutes blended conversion and should be reviewed by the media-buying team, not treated as a funnel defect."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 34000
+    basis: "rate-component only: (view_to_cart_rate_t0 - view_to_cart_rate_t1_holding_mix) * view_item_sessions_t1 * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S028
+  title: "Organic Search x desktop checkout-to-purchase: improving rate masked by adverse mix shift"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1028
+  baseline_window: {start: "2020-11-05", end: "2020-11-24"}
+  inject_at: "2020-11-25"
+  eval_window: {start: "2020-11-25", end: "2020-12-15"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate barely moved (62.0% -> 61.4%, ~ -1%) despite a clear in-segment improvement in Organic Search desktop checkout completion; the flat aggregate hides offsetting mix and rate forces."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Organic Search", device_category: "desktop"}
+    rate_multiplier: 1.18
+    volume_multiplier: 0.65
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Organic Search", device_category: "desktop"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.020, rate: 0.016, interaction: -0.002}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Mix and rate push in OPPOSITE directions, so the ~0.6pt aggregate dip understates what happened. The Organic Search desktop cell's checkout_to_purchase_rate actually IMPROVED (purchasing_sessions/begin_checkout_sessions up ~18%, contributing rate=+0.016), but that high-converting cell's share of begin_checkout_sessions shrank ~35% (contributing mix=-0.020), with a -0.002 interaction. The net is slightly negative purely because composition deteriorated. The behavior here is favorable, not a defect; the actionable issue is the volume loss of a strong-converting segment. Critic must refute any 'checkout is broken' framing: in-segment rate is up. Reconciles; the aggregate move is not statistically significant on its own, but the decomposed components are (p<0.05)."
+  expected_recommendation: "Do NOT change the checkout flow for this segment; the rate component is an improvement worth preserving and rolling out. The actionable problem is mix: Organic Search desktop begin_checkout volume fell ~35%, an acquisition/SEO matter. Route to the organic-traffic team to investigate ranking/landing-page volume loss. If a funnel test is run, hold checkout_to_purchase_rate as a guardrail to ensure the gain is protected; track begin_checkout_sessions and net_revenue as primary recovery metrics."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 41000
+    basis: "mix-component only (the actionable loss): (begin_checkout_sessions_t0_share - begin_checkout_sessions_t1_share) * total_begin_checkout_sessions_t1 * cell_checkout_to_purchase_rate * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S029
+  title: "Email x United States cart-to-checkout: rate lift and share gain reinforce (improvement)"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1029
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate rose ~7% over the eval window (48.0% -> 51.3%); Email US carts both converted to checkout at a higher rate and grew their share of add_to_cart_sessions."
+  perturbation:
+    dimension: [channel_group, country]
+    segment: {channel_group: "Email", country: "United States"}
+    rate_multiplier: 1.22
+    volume_multiplier: 1.30
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Email", country: "United States"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: 0.011, rate: 0.018, interaction: 0.004}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Positive anomaly: the 3.3pt aggregate cart_to_checkout_rate lift decomposes into rate=+0.018 (Email US begin_checkout_sessions/add_to_cart_sessions up ~22% in-cell), mix=+0.011 (Email US, a high-converting cell, grew its share of add_to_cart_sessions ~30%), and a reinforcing +0.004 interaction. Rate is the dominant and actionable behavioral driver; mix is favorable acquisition. All three terms point the same direction, so the aggregate move is genuine and not a confound. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Capture the behavioral win: codify whatever changed in the Email US cart-to-checkout path (likely a checkout CTA or shipping-promo in the email landing flow) and A/B test rolling it to other channels/countries. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. The mix gain (Email US share growth) is an acquisition success for the lifecycle team to sustain, tracked separately from the funnel change. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 29000
+    basis: "rate-component upside: (cart_to_checkout_rate_t1_holding_mix - cart_to_checkout_rate_t0) * add_to_cart_sessions_t1 * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: gain
+
+- scenario_id: S030
+  title: "Display x Android session conversion: rate collapse partially offset by share retreat"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1030
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-25"
+  eval_window: {start: "2020-12-25", end: "2021-01-14"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~5% over the eval window (3.10% -> 2.95%); Display Android sessions converted far worse but also lost session share, so the aggregate damage is muted relative to the in-cell collapse."
+  perturbation:
+    dimension: [channel_group, operating_system]
+    segment: {channel_group: "Display", operating_system: "Android"}
+    rate_multiplier: 0.60
+    volume_multiplier: 0.80
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Display", operating_system: "Android"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: 0.004, rate: -0.0017, interaction: 0.0003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Mix and rate push in OPPOSITE directions. The Display Android cell's session_conversion_rate (purchasing_sessions/sessions) collapsed ~40% in-cell, contributing rate=-0.0017 to the aggregate; but because that now-poor cell simultaneously LOST ~20% of its session share, mix=+0.004 partially offsets the damage, with a +0.0003 interaction. Net aggregate is ~ -0.0015 (the small reported dip). The actionable defect is the rate collapse, not the (helpful) volume retreat. A naive aggregate read would understate the behavioral problem because the mix shift is masking it. Critic must surface that the in-cell rate fell ~40% even though the headline only moved ~5%. Reconciles; cell-level rate change significant (p<0.05)."
+  expected_recommendation: "Address the rate component: investigate the Display Android landing/checkout experience for a tracking or creative-mismatch regression (e.g., broken deep-link, slow render) that crushed in-cell conversion. A/B test a fixed Android landing flow. Primary: session_conversion_rate; guardrails: engagement_rate, cart_abandonment_rate, net_revenue. The mix retreat (Display Android losing share) is an acquisition/media-pacing effect and is currently cushioning the blended metric; do not optimize for it. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 22000
+    basis: "rate-component only: (session_conversion_rate_t0 - session_conversion_rate_t1_holding_mix) * sessions_t1 * aov, summed over eval_window for the Display Android cell"
+    direction: loss
+
+- scenario_id: S031
+  title: "Referral x tablet add-shipping completion: rate drop and share growth in a weak cell"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1031
+  baseline_window: {start: "2020-11-10", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-20"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~9% over the eval window (60.0% -> 54.5%); Referral tablet checkouts both completed at a lower rate and grew their share of begin_checkout_sessions."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Referral", device_category: "tablet"}
+    rate_multiplier: 0.70
+    volume_multiplier: 1.55
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral", device_category: "tablet"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.018, rate: -0.030, interaction: -0.007}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "The 5.5pt aggregate checkout_to_purchase_rate drop decomposes into rate=-0.030 (Referral tablet purchasing_sessions/begin_checkout_sessions down ~30% in-cell), mix=-0.018 (this low-completing cell grew its share of begin_checkout_sessions ~55%), and a sizeable -0.007 interaction (the enlarged share multiplies the rate decay — exactly the interaction term this bucket tests). Rate is the dominant and actionable component; mix is an acquisition-mix effect; the interaction is non-trivial here and must be reported separately rather than folded into either main term. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the behavioral defect: audit the Referral tablet add_shipping_info -> payment -> purchase path for a layout/validation bug on tablet viewports that is dropping completion. A/B test a tablet-optimized checkout. Primary: checkout_to_purchase_rate; guardrails: add_shipping_info_sessions, add_payment_info_sessions, net_revenue. Flag the mix growth (Referral tablet begin_checkout share up ~55%) to acquisition as a separate item; because mix, rate, and interaction all compound negatively, recovering the rate alone reclaims the majority of the loss. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 47000
+    basis: "rate-plus-interaction components (the actionable behavioral portion): (rate_t0 - rate_t1) applied to Referral tablet begin_checkout_sessions_t1 * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S032
+  title: "Paid Search x India view-to-cart: in-cell rate gain offset by collapsing share"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1032
+  baseline_window: {start: "2021-01-02", end: "2021-01-16"}
+  inject_at: "2021-01-17"
+  eval_window: {start: "2021-01-17", end: "2021-01-31"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate slipped ~4% over the eval window (28.0% -> 26.9%) even though the Paid Search India cell's view-to-cart rate rose; a steep share loss in that cell drove the net negative."
+  perturbation:
+    dimension: [channel_group, country]
+    segment: {channel_group: "Paid Search", country: "India"}
+    rate_multiplier: 1.15
+    volume_multiplier: 0.55
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Search", country: "India"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.017, rate: 0.009, interaction: -0.003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "A classic confound where mix and rate OPPOSE. The Paid Search India cell's view_to_cart_rate (add_to_cart_sessions/view_item_sessions) actually rose ~15% in-cell (rate=+0.009), but the cell's share of view_item_sessions collapsed ~45% (mix=-0.017), with a -0.003 interaction; the net aggregate is ~ -0.011 (the small reported slip). The behavioral signal is positive and should not be touched; the actionable problem is the volume/acquisition loss of Paid Search India traffic. Critic must refute any 'product page is converting worse' narrative — in-cell rate improved. Reconciles; mix component significant (p<0.05), aggregate move modest."
+  expected_recommendation: "Preserve the rate behavior (it improved) and consider replicating the Paid Search India product-page change in other geos. The actionable issue is mix: Paid Search India view_item volume fell ~45%, a paid-acquisition/budget-pacing matter — route to the SEM team to investigate bid/budget or geo-targeting changes. If any funnel test runs, hold view_to_cart_rate as a guardrail to protect the gain; track view_item_sessions and net_revenue as the primary recovery metrics for the lost volume."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 18000
+    basis: "mix-component only (the actionable loss): (view_item_sessions_t0_share - view_item_sessions_t1_share) * total_view_item_sessions_t1 * cell_view_to_cart_rate * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: loss

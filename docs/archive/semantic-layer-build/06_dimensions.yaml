@@ -1,0 +1,362 @@
+entities:
+  - entity_name: session
+    key_column: session_key
+    grain: helios.marts.fct_funnel
+    description: "A single visit by a user, identified by the (user_pseudo_id, ga_session_id) pair. session_key = TO_HEX(MD5(CONCAT(user_pseudo_id,'-',CAST(ga_session_id AS STRING)))). The primary analytical entity for the funnel: one row per session in fct_funnel carrying the monotonic reached_* funnel flags, session_revenue, and wide session-scoped dimensions."
+  - entity_name: user
+    key_column: user_pseudo_id
+    grain: helios.marts.fct_funnel
+    description: "A pseudonymous visitor identified by GA4 user_pseudo_id (cookie/device scoped, NOT a logged-in identity). Resolvable via fct_funnel for session-derived user counts and via dim_users for user-level attributes. A single human across devices/cookies maps to multiple user_pseudo_id values, so user counts overstate unique people."
+  - entity_name: order
+    key_column: order_key
+    grain: helios.marts.fct_orders
+    description: "A completed purchase transaction. order_key = transaction_id, one row per transaction in fct_orders carrying gross_revenue, net_revenue, and order-level revenue measures. A single session may contain at most one purchase event in this GA4 dataset."
+  - entity_name: order_item
+    key_column: order_item_key
+    grain: helios.marts.fct_order_items
+    description: "A single line item within an order (one row per order x item line in fct_order_items). order_item_key uniquely identifies the (order_key, item) pairing and carries item-level dimensions (item_name, item_category, item_brand) and item_revenue_in_usd."
+  - entity_name: cohort
+    key_column: cohort_week
+    grain: helios.marts.fct_cohorts
+    description: "A weekly acquisition cohort: the set of users first seen in a given ISO week (Monday-anchored). fct_cohorts is at cohort_week x age grain and carries cohort_size and retained_users_d1/d7/d30 for retention curves."
+  - entity_name: channel
+    key_column: channel_group
+    grain: helios.marts.dim_channels
+    description: "A marketing channel grouping derived from session traffic source/medium per GA4's default channel grouping rules. dim_channels enumerates the 10 canonical channel_group values. Channel is session-scoped (first-touch within the session), not a durable user attribute."
+  - entity_name: product
+    key_column: item_id
+    grain: helios.marts.dim_items
+    description: "A sellable catalog product, identified by item_id and described in dim_items by item_name, item_category, and item_brand. Links to fct_order_items via item_id for product-level revenue and conversion analysis."
+
+time_grains:
+  - grain_name: day
+    sql_definition: "event_date"
+    description: "Calendar day of the event in the export timezone. The native daily grain of the GA4 export and the base for all anomaly detection (STL residual, weekly-seasonality aware). All coarser grains roll up from day."
+  - grain_name: week
+    sql_definition: "DATE_TRUNC(event_date, WEEK(MONDAY))"
+    description: "ISO-style week anchored on Monday; the truncated date is the Monday that starts the week containing event_date. Used for weekly cohorts and seasonality-smoothed trends. Partial leading/trailing weeks at the dataset boundary (Nov 2020 / Jan 2021) are not full 7-day weeks."
+  - grain_name: month
+    sql_definition: "DATE_TRUNC(event_date, MONTH)"
+    description: "Calendar month; the truncated date is the first day of the month containing event_date. The dataset spans only Nov 2020, Dec 2020, and Jan 2021, so month series have at most 3 points and the boundary months are partial."
+  - grain_name: quarter
+    sql_definition: "DATE_TRUNC(event_date, QUARTER)"
+    description: "Calendar quarter; the truncated date is the first day of the quarter (Jan/Apr/Jul/Oct) containing event_date. The dataset straddles Q4 2020 and Q1 2021, so both quarters are partial and quarter-over-quarter comparison is not meaningful here."
+
+dimensions:
+  # ---------------- TIME ----------------
+  - dimension_name: day
+    label: "Day"
+    category: time
+    type: temporal
+    entity: session
+    sql_definition: "event_date"
+    allowed_values: null
+    business_definition: "The calendar day on which the session (or event) occurred, in the export timezone. The finest time grain for trend lines and anomaly detection."
+    caveats:
+      - "Bounded by the dataset window (2020-11-01 through 2021-01-31); the first and last days may be partial depending on the export."
+      - "Reflects the event date, not a user's local timezone."
+    common_mistakes:
+      - "Summing rate metrics across days instead of recomputing SUM(numerator)/SUM(denominator) at the day grain (Simpson's paradox)."
+      - "Treating gaps caused by zero-traffic days as missing data rather than true zeros."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: week
+    label: "Week"
+    category: time
+    type: temporal
+    entity: session
+    sql_definition: "DATE_TRUNC(event_date, WEEK(MONDAY))"
+    allowed_values: null
+    business_definition: "The Monday that starts the calendar week containing the event. Used for weekly trend smoothing and weekly acquisition cohorts."
+    caveats:
+      - "Leading and trailing weeks at the dataset boundary are partial (fewer than 7 days) and will dip artificially."
+      - "Anchored on Monday; do not mix with Sunday-anchored week definitions from other tools."
+    common_mistakes:
+      - "Comparing a partial boundary week to a full week without normalizing."
+      - "Assuming WEEK() defaults to Monday in BigQuery - it defaults to Sunday, so the MONDAY argument is load-bearing."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: month
+    label: "Month"
+    category: time
+    type: temporal
+    entity: session
+    sql_definition: "DATE_TRUNC(event_date, MONTH)"
+    allowed_values: null
+    business_definition: "The first day of the calendar month containing the event. Used for monthly roll-ups and headline period-over-period framing."
+    caveats:
+      - "Only Nov 2020, Dec 2020, and Jan 2021 exist; boundary months may be partial."
+      - "With at most three months, month-over-month trend inference is fragile."
+    common_mistakes:
+      - "Reading a partial boundary month as a real decline."
+      - "Charting month as a string label that sorts lexically rather than as a DATE."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: quarter
+    label: "Quarter"
+    category: time
+    type: temporal
+    entity: session
+    sql_definition: "DATE_TRUNC(event_date, QUARTER)"
+    allowed_values: null
+    business_definition: "The first day of the calendar quarter (Jan/Apr/Jul/Oct) containing the event. The coarsest supported time grain."
+    caveats:
+      - "The dataset straddles only Q4 2020 and Q1 2021; both are partial."
+      - "Quarter-over-quarter comparison is not meaningful within this dataset window."
+    common_mistakes:
+      - "Drawing seasonality conclusions from two partial quarters."
+      - "Confusing fiscal quarters with these calendar quarters."
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---------------- USER ----------------
+  - dimension_name: is_new_user
+    label: "New vs Returning"
+    category: user
+    type: boolean
+    entity: user
+    sql_definition: "is_new_user"
+    allowed_values: [true, false]
+    business_definition: "Whether the session belongs to a user appearing for the first time in the dataset window (TRUE = New) versus a previously-seen user (FALSE = Returning). Drives new/returning segmentation across funnel and revenue."
+    caveats:
+      - "New/Returning is defined relative to the GA4 export window, not the user's true lifetime; users acquired before Nov 2020 may be mislabeled New on their first in-window appearance."
+      - "Scoped to user_pseudo_id, which is cookie/device-bound, so cleared cookies or new devices inflate New."
+    common_mistakes:
+      - "Equating New user with first session - a user can have multiple sessions while still flagged New within the window."
+      - "Filtering on is_new_user at the order grain expecting a clean new-customer count; use new_purchasers / purchasing_users instead."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: country
+    label: "Country"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "country"
+    allowed_values: null
+    business_definition: "The country from which the session originated, derived from GA4 geo enrichment of the device IP."
+    caveats:
+      - "IP-based geolocation is approximate; VPNs and corporate proxies misattribute country."
+      - "May contain a '(not set)' bucket for unresolved geo; treat it as its own category, not null."
+    common_mistakes:
+      - "Assuming country reflects billing/shipping country - it is the session's network location."
+      - "Dropping '(not set)' silently, which biases geo mix."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: region
+    label: "Region"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "region"
+    allowed_values: null
+    business_definition: "The sub-national region (state/province) of the session, derived from GA4 geo enrichment, nested under country."
+    caveats:
+      - "Region granularity and naming vary by country; not all countries populate region."
+      - "High '(not set)' rate; less reliable than country."
+    common_mistakes:
+      - "Analyzing region without also filtering or grouping by country (region names are not globally unique)."
+      - "Comparing region cardinality across countries as if uniform."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: device_category
+    label: "Device"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "device_category"
+    allowed_values: [desktop, mobile, tablet]
+    business_definition: "The class of device used for the session as classified by GA4 (desktop, mobile, or tablet). A primary segmentation axis for conversion and funnel diagnosis."
+    caveats:
+      - "Derived from user-agent heuristics; misclassification is possible for hybrid/tablet devices."
+      - "A single user may switch device_category across sessions, so it is a session attribute, not a stable user trait."
+    common_mistakes:
+      - "Treating device_category as a user-level attribute and double-counting users who span devices."
+      - "Assuming the three values are mutually exclusive at the user level - they are exclusive only per session."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: browser
+    label: "Browser"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "browser"
+    allowed_values: null
+    business_definition: "The web browser used for the session (e.g., Chrome, Safari, Edge, Firefox), as reported by GA4 from the user-agent."
+    caveats:
+      - "Free-text-like values with high cardinality and inconsistent casing/versioning across the export."
+      - "In-app webviews and bots may surface as unusual browser strings."
+    common_mistakes:
+      - "Grouping by raw browser without normalizing variants, fragmenting the same browser across labels."
+      - "Using browser as a proxy for device_category - they are correlated but not equivalent."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: operating_system
+    label: "Operating System"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "operating_system"
+    allowed_values: null
+    business_definition: "The operating system of the device used for the session (e.g., Windows, iOS, Android, Macintosh, Chrome OS), as reported by GA4."
+    caveats:
+      - "High cardinality with version noise; values can be '(not set)' when unresolved."
+      - "Correlated with device_category and browser; not an independent axis."
+    common_mistakes:
+      - "Inferring device_category from operating_system (e.g., assuming all iOS is mobile - iPadOS reports as tablet)."
+      - "Comparing OS mix without normalizing version-suffixed labels."
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---------------- TRAFFIC ----------------
+  - dimension_name: source
+    label: "Source"
+    category: traffic
+    type: categorical
+    entity: session
+    sql_definition: "source"
+    allowed_values: null
+    business_definition: "The traffic source (origin) of the session, e.g., google, (direct), bing, an email mailer, or a referring domain, as captured by GA4 traffic_source."
+    caveats:
+      - "First-touch within the export: GA4 traffic_source reflects the user's first acquisition source, so per-session source can lag the actual session origin."
+      - "High cardinality; '(direct)' and '(not set)' are common catch-all values."
+    common_mistakes:
+      - "Treating source alone as a channel - source must be combined with medium (and channel grouping) to be meaningful."
+      - "Assuming source is recomputed per session; it is first-touch attributed."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: medium
+    label: "Medium"
+    category: traffic
+    type: categorical
+    entity: session
+    sql_definition: "medium"
+    allowed_values: null
+    business_definition: "The traffic medium of the session, e.g., organic, cpc, referral, email, (none), as captured by GA4 traffic_source. Pairs with source to form the source/medium identity."
+    caveats:
+      - "First-touch attributed like source; '(none)' indicates direct traffic."
+      - "Inconsistent UTM hygiene upstream produces near-duplicate mediums (cpc vs ppc)."
+    common_mistakes:
+      - "Reading medium in isolation without source."
+      - "Assuming medium maps one-to-one onto channel_group; the mapping is rule-based and many-to-one."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: campaign
+    label: "Campaign"
+    category: traffic
+    type: categorical
+    entity: session
+    sql_definition: "campaign"
+    allowed_values: null
+    business_definition: "The marketing campaign name attributed to the session (from UTM campaign), e.g., a paid-search or email campaign identifier."
+    caveats:
+      - "First-touch attributed; '(not set)' / '(direct)' dominate organic and direct traffic."
+      - "Depends entirely on upstream UTM tagging discipline; untagged paid traffic appears campaign-less."
+    common_mistakes:
+      - "Summing campaign-level revenue and expecting it to equal total revenue - most sessions have no campaign."
+      - "Comparing campaigns without controlling for channel_group / medium."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: channel_group
+    label: "Channel"
+    category: traffic
+    type: categorical
+    entity: channel
+    sql_definition: "channel_group"
+    allowed_values: [Direct, "Organic Search", "Paid Search", Display, "Paid Social", "Organic Social", Email, Affiliates, Referral, Other]
+    business_definition: "The GA4 default channel grouping for the session, derived by rule from source and medium into one of 10 canonical buckets. The primary acquisition-analysis axis and a REQUIRED dimension for channel_revenue and channel_conversion_rate."
+    caveats:
+      - "GOTCHA: GA4 traffic_source (source/medium/campaign) is FIRST-TOUCH user-level attribution, but channel_group here is recomputed SESSION-SCOPED from each session's own source/medium so that channel mix reflects the session, not the user's first-ever touch. Do not assume it equals the user's first-touch channel."
+      - "Session-scoped derivation means a single user can appear under multiple channel_group values across sessions."
+      - "The 'Other' bucket absorbs un-mappable or ambiguous source/medium combinations and can mask real channels with poor UTM hygiene."
+    common_mistakes:
+      - "Assuming channel_group is first-touch like raw source/medium - it is session-scoped here."
+      - "Hardcoding fewer/different channel labels; the canonical set is exactly these 10 values."
+      - "Treating 'Paid Search'/'Paid Social'/'Display' as the only paid channels when building paid_sessions without confirming the rule set."
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---------------- PRODUCT ----------------
+  - dimension_name: item_name
+    label: "Product"
+    category: product
+    type: categorical
+    entity: product
+    sql_definition: "item_name"
+    allowed_values: null
+    business_definition: "The human-readable product name of an item, used for product-level revenue and conversion analysis at the order-item grain."
+    caveats:
+      - "High cardinality; names may change over time while item_id stays stable, so historical joins on name can drift."
+      - "Item-scoped dimension; only meaningful on item-level metrics (fct_order_items) or item_view sessions."
+    common_mistakes:
+      - "Joining product analytics on item_name instead of item_id (names are not guaranteed unique or stable)."
+      - "Summing product_revenue across item_name and expecting it to reconcile to session-attributed revenue."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: item_category
+    label: "Category"
+    category: product
+    type: categorical
+    entity: product
+    sql_definition: "item_category"
+    allowed_values: null
+    business_definition: "The merchandising category an item belongs to (e.g., Apparel, Drinkware, Office), used to roll product metrics up to category level."
+    caveats:
+      - "May be '(not set)' for un-categorized items."
+      - "Single-level category only; no sub-category hierarchy is modeled in this dataset."
+    common_mistakes:
+      - "Assuming a multi-level category hierarchy exists."
+      - "Treating '(not set)' as null and dropping it, biasing category mix."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: item_brand
+    label: "Brand"
+    category: product
+    type: categorical
+    entity: product
+    sql_definition: "item_brand"
+    allowed_values: null
+    business_definition: "The brand associated with an item, used for brand-level product revenue and attach-rate analysis."
+    caveats:
+      - "Sparsely populated in the GA4 sample; '(not set)' is common and dominates."
+      - "Brand labeling is inconsistent across the catalog."
+    common_mistakes:
+      - "Drawing brand conclusions where most items have no brand set."
+      - "Confusing brand with category - they are independent item attributes."
+    owner: analytics-eng
+    version: 1.0.0
+
+  # ---------------- SESSION-LEVEL (uncategorized canonical dims) ----------------
+  - dimension_name: landing_page
+    label: "Landing Page"
+    category: traffic
+    type: categorical
+    entity: session
+    sql_definition: "landing_page"
+    allowed_values: null
+    business_definition: "The page path on which the session began (first page_view of the session). A key axis for entry-experience diagnosis and conversion-rate drill-downs."
+    caveats:
+      - "Path-only (query strings/host typically stripped); near-duplicate paths can fragment if normalization differs."
+      - "Session-scoped; a user has one landing_page per session but many across sessions."
+      - "May be '(not set)' when the first page cannot be resolved."
+    common_mistakes:
+      - "Treating landing_page as the page where conversion happened rather than the session entry page."
+      - "Comparing landing pages without controlling for channel_group (entry pages correlate strongly with channel)."
+    owner: analytics-eng
+    version: 1.0.0
+  - dimension_name: session_number_bucket
+    label: "Session Number"
+    category: user
+    type: categorical
+    entity: session
+    sql_definition: "session_number_bucket"
+    allowed_values: ["1", "2", "3", "4-6", "7+"]
+    business_definition: "A bucketed version of the session's ordinal index for the user (ga_session_number) within the window: the 1st session, 2nd, 3rd, then grouped 4-6 and 7+. Captures visit recency/loyalty depth."
+    caveats:
+      - "Ordinal is relative to the export window (first session here may not be the user's true first session ever)."
+      - "Cookie/device-scoped via user_pseudo_id, so a single human's session count is fragmented across cookies."
+      - "Bucket boundaries are a modeling choice; raw ga_session_number is not exposed as a canonical dimension."
+    common_mistakes:
+      - "Interpreting bucket '1' as a brand-new user - use is_new_user for that; a Returning user's later session can still be bucket 1 within a fresh cookie."
+      - "Treating the buckets as evenly sized or numeric for arithmetic; they are ordered categories."
+    owner: analytics-eng
+    version: 1.0.0

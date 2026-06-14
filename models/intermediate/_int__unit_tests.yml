@@ -1,0 +1,56 @@
+# models/intermediate/_int__unit_tests.yml
+# KEYSTONE golden-value tests (dbt 1.8+). They run on fixed synthetic input every
+# build, in <1s, catching silent sessionization / monotonicity regressions before
+# any real data flows. THIS IS THE M3 EXIT GATE ("monotonicity test passes").
+#
+# NOTE: DBT_GUIDE.md §6.5 prints these fixtures as ILLUSTRATIVE STUBS — a placeholder
+# session_key ("{{ '%s' | format('') }}"), a `has_gclid` field that is not a real
+# stg_ga4__events column, and rows missing ga_session_id (which both keystones filter
+# on). They are corrected below to the real staging columns so they actually execute.
+
+unit_tests:
+  - name: test_reached_flags_are_max_downstream
+    description: a session that only fired 'purchase' must back-fill ALL upstream reached_* flags (monotonicity).
+    model: int_ga4__funnel_steps
+    given:
+      - input: ref('stg_ga4__events')
+        rows:
+          - {session_key: 's1', ga_session_id: 1, event_name: 'purchase',     purchase_revenue_in_usd: 50.0}
+          - {session_key: 's2', ga_session_id: 1, event_name: 'add_to_cart',   purchase_revenue_in_usd: null}
+          - {session_key: 's3', ga_session_id: 1, event_name: 'view_item',     purchase_revenue_in_usd: null}
+    expect:
+      rows:
+        # s1 purchased -> EVERY upstream flag is true (monotonic), revenue carried once
+        - {session_key: 's1', reached_view_item: true,  reached_add_to_cart: true,
+           reached_begin_checkout: true, reached_add_shipping_info: true,
+           reached_add_payment_info: true, reached_purchase: true, session_revenue: 50.0}
+        # s2 only added to cart -> upstream true, downstream false, no revenue
+        - {session_key: 's2', reached_view_item: true,  reached_add_to_cart: true,
+           reached_begin_checkout: false, reached_add_shipping_info: false,
+           reached_add_payment_info: false, reached_purchase: false, session_revenue: 0.0}
+        # s3 only viewed -> only reached_view_item true
+        - {session_key: 's3', reached_view_item: true,  reached_add_to_cart: false,
+           reached_begin_checkout: false, reached_add_shipping_info: false,
+           reached_add_payment_info: false, reached_purchase: false, session_revenue: 0.0}
+
+  - name: test_sessionize_channel_and_engagement
+    description: >
+      events collapse to one row per (user, ga_session_id); channel_group comes from the
+      gclid-aware macro on SESSION-SCOPED source/medium; engaged_session uses the canonical rule.
+    model: int_ga4__sessionized
+    given:
+      - input: ref('stg_ga4__events')
+        rows:
+          # u1: two events, one session; gclid present -> Paid Search; session_engaged='1' -> engaged
+          - {user_pseudo_id: 'u1', ga_session_id: 100, event_name: 'session_start',
+             event_timestamp: '2021-01-07 10:00:01', session_engaged: '1', event_source: 'google',
+             event_medium: 'cpc', gclid: 'abc123', device_category: 'mobile', country: 'US'}
+          - {user_pseudo_id: 'u1', ga_session_id: 100, event_name: 'page_view',
+             event_timestamp: '2021-01-07 10:00:02', event_source: 'google', event_medium: 'cpc', gclid: 'abc123'}
+          # u2: direct/none, no gclid, not engaged -> Direct, engaged false
+          - {user_pseudo_id: 'u2', ga_session_id: 100, event_name: 'session_start',
+             event_timestamp: '2021-01-07 11:00:03', event_source: '(direct)', event_medium: '(none)', gclid: null}
+    expect:
+      rows:
+        - {user_pseudo_id: 'u1', channel_group: 'Paid Search', engaged_session: true}
+        - {user_pseudo_id: 'u2', channel_group: 'Direct',      engaged_session: false}

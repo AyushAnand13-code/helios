@@ -1,0 +1,1539 @@
+# Helios Evaluation Benchmark - 50 labeled e-commerce anomaly scenarios (artifact A10.3)
+# Generated 2026-06-03. Spec: HELIOS_PROJECT_BIBLE.md section 20 (Evaluation Framework).
+# Buckets: single_segment_rate S001-S010 | single_segment_mix S011-S020 |
+#   multi_segment_rate S021-S026 | multi_segment_mixed S027-S032 |
+#   seasonality_decoy S033-S038 | no_anomaly_control S039-S044 | data_quality S045-S050
+# This file is a bare YAML list of 50 scenario mappings: yaml.safe_load(f) -> list[dict].
+# Each scenario carries the machine-readable injection spec + 5 labels:
+#   anomaly, ground_truth, expected_diagnosis, expected_recommendation, expected_revenue_impact.
+- scenario_id: S001
+  title: "Paid Search x mobile checkout-to-purchase rate collapse"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1001
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell 11% week-over-week (6.1% -> 5.4%) over the eval window; overall purchasing_sessions down ~9%."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Paid Search", device_category: "mobile"}
+    rate_multiplier: 0.55
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Search", device_category: "mobile"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.013, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Paid Search x mobile checkout (purchasing_sessions/begin_checkout_sessions down 45% in that cell only); mix across device/channel is flat, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a simplified mobile payment step (one-tap wallet + autofill) for Paid Search mobile traffic. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 38000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S002
+  title: "Mobile view-to-cart rate drop after PDP redesign"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1002
+  baseline_window: {start: "2020-11-08", end: "2020-11-24"}
+  inject_at: "2020-11-25"
+  eval_window: {start: "2020-11-25", end: "2020-12-15"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate slid ~8% over the eval window (18.5% -> 17.0%); overall add_to_cart_sessions softened despite stable view_item_sessions."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: 0.70
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.015, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to mobile add-to-cart (add_to_cart_sessions/view_item_sessions down 30% on mobile only); desktop and tablet rates unchanged and device mix is flat, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a sticky mobile add-to-cart button with size/variant preselection on product detail pages for mobile traffic. Primary: view_to_cart_rate; guardrails: cart_to_checkout_rate, revenue_per_session, engagement_rate. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 52000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_conversion * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S003
+  title: "Display channel cart-to-checkout rate deterioration"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1003
+  baseline_window: {start: "2020-12-05", end: "2020-12-22"}
+  inject_at: "2020-12-23"
+  eval_window: {start: "2020-12-23", end: "2021-01-12"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate eased ~6% over the eval window (44.0% -> 41.5%); begin_checkout_sessions down modestly while add_to_cart_sessions held."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Display"}
+    rate_multiplier: 0.68
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Display"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.025, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Display traffic at the cart-to-checkout step (begin_checkout_sessions/add_to_cart_sessions down 32% for Display only); other channels' rates and the channel mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test an expedited guest-checkout entry (skip-account prompt) on the cart page for Display-sourced sessions. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 21000
+    basis: "(rate_t0 - rate_t1) * add_to_cart_sessions_t1 * downstream_conversion * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S004
+  title: "Canada session conversion rate decline"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1004
+  baseline_window: {start: "2021-01-02", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate dipped ~5% over the eval window (2.10% -> 2.00%); purchasing_sessions softened with sessions flat."
+  perturbation:
+    dimension: [country]
+    segment: {country: "Canada"}
+    rate_multiplier: 0.60
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "Canada"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0010, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to Canada sessions (purchasing_sessions/sessions down 40% for Canada only); other countries' conversion rates and the country mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test localized CAD pricing display and duties-included messaging at checkout for Canada sessions. Primary: session_conversion_rate; guardrails: checkout_to_purchase_rate, aov, revenue_per_session. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 14000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over eval_window for Canada"
+    direction: loss
+
+- scenario_id: S005
+  title: "Safari cart abandonment rate spike"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1005
+  baseline_window: {start: "2020-11-10", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-17"}
+  target_metric: cart_abandonment_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_abandonment_rate rose ~4% over the eval window (78.0% -> 81.0%); purchasing_sessions fell relative to add_to_cart_sessions."
+  perturbation:
+    dimension: [browser]
+    segment: {browser: "Safari"}
+    rate_multiplier: 0.65
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {browser: "Safari"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Safari, where the purchase-from-cart rate fell 35% (abandonment up) for Safari only; other browsers' abandonment and the browser mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05). Note: timing overlaps Black Friday, but the lift is browser-specific not store-wide, ruling out seasonality."
+  expected_recommendation: "A/B test a Safari-targeted checkout fix (Apple Pay button + saved-card autofill, third-party-cookie-independent session handling). Primary: cart_abandonment_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 31000
+    basis: "(rate_t1 - rate_t0)_abandonment * add_to_cart_sessions_t1 * aov, summed over eval_window for Safari"
+    direction: loss
+
+- scenario_id: S006
+  title: "Sale landing page checkout-to-purchase rate drop"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1006
+  baseline_window: {start: "2020-12-26", end: "2021-01-10"}
+  inject_at: "2021-01-11"
+  eval_window: {start: "2021-01-11", end: "2021-01-31"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate eased ~5% over the eval window (60.0% -> 57.0%); purchasing_sessions down with begin_checkout_sessions stable."
+  perturbation:
+    dimension: [landing_page]
+    segment: {landing_page: "/google+redesign/sale"}
+    rate_multiplier: 0.72
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {landing_page: "/google+redesign/sale"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to sessions landing on /google+redesign/sale (purchasing_sessions/begin_checkout_sessions down 28% for that landing page only); other landing pages' rates and the landing-page mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test clearer sale-eligibility and promo-code application at the payment step for /google+redesign/sale landers. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 18000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over eval_window for /google+redesign/sale"
+    direction: loss
+
+- scenario_id: S007
+  title: "New-user view-to-cart rate erosion"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1007
+  baseline_window: {start: "2020-12-01", end: "2020-12-18"}
+  inject_at: "2020-12-19"
+  eval_window: {start: "2020-12-19", end: "2021-01-08"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate softened ~7% over the eval window (16.0% -> 14.9%); add_to_cart_sessions down while view_item_sessions held."
+  perturbation:
+    dimension: [is_new_user]
+    segment: {is_new_user: true}
+    rate_multiplier: 0.75
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {is_new_user: true}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.011, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to new users at the add-to-cart step (add_to_cart_sessions/view_item_sessions down 25% for is_new_user=true only); returning-user rate and the new-vs-returning mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a first-visit incentive and clearer add-to-cart affordance on product pages for new users. Primary: view_to_cart_rate; guardrails: cart_to_checkout_rate, engagement_rate, revenue_per_user. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 27000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_conversion * aov, summed over eval_window for new users"
+    direction: loss
+
+- scenario_id: S008
+  title: "Organic Search x desktop session conversion rate decline"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1008
+  baseline_window: {start: "2020-11-15", end: "2020-12-02"}
+  inject_at: "2020-12-03"
+  eval_window: {start: "2020-12-03", end: "2020-12-23"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate dipped ~6% over the eval window (2.40% -> 2.25%); purchasing_sessions down with sessions stable."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Organic Search", device_category: "desktop"}
+    rate_multiplier: 0.62
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Organic Search", device_category: "desktop"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0015, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Organic Search x desktop sessions (purchasing_sessions/sessions down 38% in that cell only); all other channel/device cells and the overall mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a streamlined desktop checkout (persistent cart + express-pay) for Organic Search desktop landers. Primary: session_conversion_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 44000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over eval_window for Organic Search x desktop"
+    direction: loss
+
+- scenario_id: S009
+  title: "Tablet cart-to-checkout rate improvement"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1009
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate rose ~4% over the eval window (43.0% -> 44.8%); begin_checkout_sessions up with add_to_cart_sessions stable."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "tablet"}
+    rate_multiplier: 1.35
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "tablet"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.018, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate improvement confined to tablet at the cart-to-checkout step (begin_checkout_sessions/add_to_cart_sessions up 35% on tablet only); desktop and mobile rates and the device mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Roll out the tablet cart-page layout that drove the lift and A/B test porting it to mobile. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 12000
+    basis: "(rate_t1 - rate_t0) * add_to_cart_sessions_t1 * downstream_conversion * aov, summed over eval_window for tablet"
+    direction: gain
+
+- scenario_id: S010
+  title: "United Kingdom checkout-to-purchase rate improvement"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1010
+  baseline_window: {start: "2020-12-10", end: "2020-12-27"}
+  inject_at: "2020-12-28"
+  eval_window: {start: "2020-12-28", end: "2021-01-17"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate rose ~5% over the eval window (58.0% -> 60.9%); purchasing_sessions up with begin_checkout_sessions stable."
+  perturbation:
+    dimension: [country]
+    segment: {country: "United Kingdom"}
+    rate_multiplier: 1.30
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "United Kingdom"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.029, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate improvement confined to United Kingdom sessions at the checkout-to-purchase step (purchasing_sessions/begin_checkout_sessions up 30% for the UK only); other countries' rates and the country mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Confirm the UK payment-step change (local card schemes + GBP express-pay) via holdback A/B test before global rollout. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 16000
+    basis: "(rate_t1 - rate_t0) * begin_checkout_sessions_t1 * aov, summed over eval_window for United Kingdom"
+    direction: gain
+- scenario_id: S011
+  title: "Desktop->mobile share shift drags aggregate session_conversion_rate (rates flat)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1011
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~9% over the eval window (2.6% -> 2.4%) even though every device's own conversion rate is unchanged; mobile's session share rose from ~46% to ~58%."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: null
+    volume_multiplier: 1.6
+    hold_constant: [session_conversion_rate, view_to_cart_rate, cart_to_checkout_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0018, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Pure MIX-shift / composition change, NOT a funnel-behavior change. Each device's session_conversion_rate is flat; the aggregate fell only because session share moved toward lower-converting mobile (share ~46% -> ~58%). Per-segment rates reconcile exactly; the apparent ~9% aggregate drop is fully explained by mix. Do NOT 'fix the checkout' - the checkout is working as before."
+  expected_recommendation: "Rebalance acquisition: this is a traffic-quality/mix problem, not a UX bug. Audit why mobile share surged (campaign creative, device targeting, or budget reallocation) and shift paid spend back toward higher-converting desktop audiences, or improve mobile traffic targeting. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. Do NOT run a checkout-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 42000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, where the rate delta is driven entirely by device session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S012
+  title: "Paid Search->Display share shift lowers aggregate session_conversion_rate"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1012
+  baseline_window: {start: "2020-11-08", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-15"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~12% over the eval window (3.0% -> 2.65%); each channel's own conversion rate held steady while Display's session share roughly doubled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Display"}
+    rate_multiplier: null
+    volume_multiplier: 2.2
+    hold_constant: [session_conversion_rate, view_to_cart_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {channel_group: "Display"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0035, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a funnel-behavior change. Display and Paid Search each keep their own session_conversion_rate flat; the aggregate dropped because cheap, low-intent Display traffic grew its session share (~doubled), diluting the blend. Decomposition is pure mix; warn against 'fixing the checkout' - no step in the funnel degraded."
+  expected_recommendation: "Acquisition/channel-mix action: trim or re-target the Display campaign that ballooned low-intent sessions and reallocate budget toward Paid Search, which converts higher. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session, net_revenue. NOT a funnel-step A/B test."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 55000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, rate delta driven by channel session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S013
+  title: "US->India share shift pulls down aggregate aov (per-country AOV unchanged)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1013
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-25"
+  eval_window: {start: "2020-12-25", end: "2021-01-14"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate aov fell ~10% over the eval window ($72 -> $65) while every country's own AOV is flat; India's transaction share rose sharply as its session share grew."
+  perturbation:
+    dimension: [country]
+    segment: {country: "India"}
+    rate_multiplier: null
+    volume_multiplier: 1.9
+    hold_constant: [aov, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {country: "India"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -7.0, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a pricing or basket-behavior change. Each country's aov is unchanged; the aggregate aov fell only because transaction share moved toward lower-AOV India (session/transaction share up ~1.9x). Pure mix decomposition; warn against discount/merchandising 'fixes' aimed at raising basket size - per-market behavior is stable."
+  expected_recommendation: "Acquisition/geo-mix action: this is a geography-mix shift, not a basket problem. Review the campaign or localization push that grew India's low-AOV share and rebalance paid spend toward higher-AOV markets (e.g. United States, Canada), or set market-specific ROAS targets. Primary: aov; guardrails: transactions, net_revenue. NOT a checkout or upsell experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 31000
+    basis: "(aov_t0 - aov_t1) * transactions_t1, where the aov delta is entirely composition-driven; summed over eval_window"
+    direction: loss
+
+- scenario_id: S014
+  title: "Adversarial: every device rate IMPROVES yet aggregate session_conversion_rate falls (mobile share surge)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1014
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~7% (2.5% -> 2.32%) over the eval window, yet desktop, mobile and tablet each posted slightly HIGHER own conversion rates; mobile's session share jumped from ~44% to ~57%."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: null
+    volume_multiplier: 1.7
+    hold_constant: [session_conversion_rate, view_to_cart_rate, cart_to_checkout_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0018, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Simpson's-paradox MIX-shift, NOT a funnel-behavior change. Adversarial: every single device's own session_conversion_rate is flat-to-improved, yet the blended aggregate falls purely because session share shifted toward lower-converting mobile (~44% -> ~57%). The aggregate decline is 100% composition; in-segment behavior actually improved. Strongly warn against 'fixing the checkout' - doing so would chase a phantom."
+  expected_recommendation: "Acquisition/traffic-quality action only. Because every device already converts as well or better, the lever is the traffic blend: investigate the source of the mobile session surge and rebalance paid spend toward desktop-weighted, higher-converting audiences or tighten mobile targeting quality. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. Explicitly NOT a checkout/funnel experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 26000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, with the rate delta arising solely from device session-share change despite per-segment rate gains; summed over eval_window"
+    direction: loss
+
+- scenario_id: S015
+  title: "Adversarial: Organic Search->Paid Social mix lowers aggregate revenue_per_session despite flat per-channel RPS"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1015
+  baseline_window: {start: "2020-11-15", end: "2020-12-04"}
+  inject_at: "2020-12-05"
+  eval_window: {start: "2020-12-05", end: "2020-12-24"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Aggregate revenue_per_session fell ~11% over the eval window ($1.95 -> $1.74); each channel's own revenue_per_session is flat or higher, but Paid Social's session share roughly tripled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Paid Social"}
+    rate_multiplier: null
+    volume_multiplier: 2.8
+    hold_constant: [revenue_per_session, session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.21, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Adversarial MIX-shift / composition change, NOT a monetization-behavior change. Per-channel revenue_per_session held flat or rose, yet the blended figure fell because low-RPS Paid Social tripled its session share, diluting the mix. Decomposition is pure mix (rate=0, interaction=0); warn against site-side conversion 'fixes' - every channel monetizes as before."
+  expected_recommendation: "Acquisition/channel-mix action: rebalance paid budget away from the bloated low-RPS Paid Social campaign toward higher-RPS Organic Search support / Paid Search, or fix Paid Social audience targeting. Primary: revenue_per_session; guardrails: sessions, net_revenue, session_conversion_rate. NOT a funnel-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 60000
+    basis: "(rps_t0 - rps_t1) * sessions_t1, with the RPS delta driven entirely by channel session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S016
+  title: "Windows->Android OS share shift lowers aggregate session_conversion_rate"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1016
+  baseline_window: {start: "2020-12-10", end: "2020-12-29"}
+  inject_at: "2020-12-30"
+  eval_window: {start: "2020-12-30", end: "2021-01-18"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~8% over the eval window (2.7% -> 2.48%); each operating_system's own conversion rate is flat while Android's session share rose markedly."
+  perturbation:
+    dimension: [operating_system]
+    segment: {operating_system: "Android"}
+    rate_multiplier: null
+    volume_multiplier: 1.75
+    hold_constant: [session_conversion_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {operating_system: "Android"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0022, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a funnel-behavior change. Windows, Macintosh, iOS and Android each hold their own session_conversion_rate flat; the aggregate dipped only because session share moved toward lower-converting Android. Pure mix; warn against 'fixing the checkout' - no funnel step degraded for any OS."
+  expected_recommendation: "Acquisition/traffic-quality action: identify why Android session share grew (campaign device targeting or app-referral traffic) and rebalance spend toward higher-converting OS audiences, or tighten Android targeting. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. NOT an OS-specific checkout experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 37000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, rate delta driven by OS session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S017
+  title: "Apparel->Drinkware item-category mix lowers aggregate aov"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1017
+  baseline_window: {start: "2020-11-20", end: "2020-12-09"}
+  inject_at: "2020-12-10"
+  eval_window: {start: "2020-12-10", end: "2020-12-29"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate aov fell ~9% over the eval window ($68 -> $62) while every item_category's own AOV is unchanged; low-ticket Drinkware grew its transaction share as its session share rose."
+  perturbation:
+    dimension: [item_category]
+    segment: {item_category: "Drinkware"}
+    rate_multiplier: null
+    volume_multiplier: 1.8
+    hold_constant: [aov, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {item_category: "Drinkware"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -6.0, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a pricing or basket-behavior change. Each item_category's aov is flat; the aggregate aov fell only because purchase share moved toward low-ticket Drinkware (session share up ~1.8x). Pure mix decomposition; warn against discounting or basket-size 'fixes' - per-category economics are stable."
+  expected_recommendation: "Acquisition/merchandising-mix action: this is a category-mix shift, not a basket problem. Review the promotion or landing-page push driving Drinkware-heavy traffic and rebalance acquisition toward higher-AOV categories (e.g. Apparel, Bags, Electronics) or add cross-sell of higher-ticket items. Primary: aov; guardrails: transactions, net_revenue. NOT a checkout experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 24000
+    basis: "(aov_t0 - aov_t1) * transactions_t1, with the aov delta entirely composition-driven; summed over eval_window"
+    direction: loss
+
+- scenario_id: S018
+  title: "Adversarial: Direct->Referral mix lowers aggregate checkout_to_purchase_rate despite flat per-channel rates"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1018
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~10% over the eval window (62% -> 56%) yet every channel's own checkout_to_purchase_rate is flat; low-completing Referral traffic grew its begin_checkout share substantially."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Referral"}
+    rate_multiplier: null
+    volume_multiplier: 2.4
+    hold_constant: [checkout_to_purchase_rate, cart_to_checkout_rate, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.060, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Adversarial MIX-shift / composition change, NOT a checkout-behavior change. Every channel's own checkout_to_purchase_rate is unchanged; the aggregate fell because begin_checkout share shifted toward low-completing Referral traffic (~2.4x share growth). The aggregate rate metric moved purely by composition (rate=0, interaction=0). Strongly warn against 'fixing the checkout' - no channel's payment step degraded; the checkout is fine."
+  expected_recommendation: "Acquisition/traffic-quality action: the lever is the channel blend, not the payment step. Audit the Referral source that flooded begin_checkout with low-intent traffic and rebalance toward higher-completing channels (e.g. Direct, Email), or tighten referral-partner quality. Primary: checkout_to_purchase_rate; guardrails: begin_checkout_sessions, net_revenue, aov. Explicitly NOT a checkout-step A/B test."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 33000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, with the rate delta driven entirely by channel begin_checkout-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S019
+  title: "Favorable: mobile->desktop share shift LIFTS aggregate session_conversion_rate (gain)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1019
+  baseline_window: {start: "2020-11-10", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-19"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate ROSE ~9% over the eval window (2.5% -> 2.72%) with no change in any device's own conversion rate; desktop's session share grew as higher-intent desktop traffic increased."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: 1.5
+    hold_constant: [session_conversion_rate, view_to_cart_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "desktop"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: 0.0022, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Favorable MIX-shift / composition change, NOT a funnel-behavior improvement. Each device's session_conversion_rate is unchanged; the aggregate rose purely because session share moved toward higher-converting desktop. Pure mix (rate=0, interaction=0). Do NOT attribute the lift to a checkout improvement - the funnel is unchanged; the gain is composition-driven and will reverse if the desktop share gain reverses."
+  expected_recommendation: "Acquisition/traffic-quality action: capitalize on the favorable mix by sustaining the desktop-weighted, higher-converting acquisition that drove the share gain (protect that campaign's budget) while monitoring durability. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. NOT a funnel-step experiment - there is no behavior change to scale."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Favorable composition-only shift: apparent aggregate-rate gain (~+0.0022 abs) is entirely mix-driven, no behavioral lift to bank; no actionable revenue at risk"
+    direction: none
+
+- scenario_id: S020
+  title: "Favorable: Display->Email channel mix LIFTS aggregate revenue_per_session (gain)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1020
+  baseline_window: {start: "2021-01-02", end: "2021-01-16"}
+  inject_at: "2021-01-17"
+  eval_window: {start: "2021-01-17", end: "2021-01-31"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Aggregate revenue_per_session ROSE ~12% over the eval window ($1.70 -> $1.90) with every channel's own revenue_per_session unchanged; high-RPS Email grew its session share as a campaign scaled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Email"}
+    rate_multiplier: null
+    volume_multiplier: 2.0
+    hold_constant: [revenue_per_session, session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {channel_group: "Email"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: 0.20, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Favorable MIX-shift / composition change, NOT a monetization-behavior improvement. Each channel's revenue_per_session is flat; the blended figure rose only because high-RPS Email doubled its session share. Pure mix (rate=0, interaction=0). Do NOT credit a site-side conversion improvement - the lift is composition-driven and tracks the Email share gain."
+  expected_recommendation: "Acquisition/channel-mix action: lean into the favorable mix by sustaining and scaling the high-RPS Email program that grew its share, while watching for diminishing returns; do not over-invest assuming a permanent behavioral lift. Primary: revenue_per_session; guardrails: sessions, net_revenue. NOT a funnel-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Favorable composition-only shift: apparent RPS gain (~+0.20/session) is entirely mix-driven via Email share growth, no behavioral lift to bank; no actionable revenue at risk"
+    direction: none
+- scenario_id: S021
+  title: "iOS Safari + iOS Chrome checkout-to-purchase rate collapse (payment SDK)"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1021
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~13% week-over-week (54% -> 47%) over the eval window; overall purchasing_sessions down ~8% with begin_checkout_sessions roughly flat."
+  perturbation:
+    dimension: [operating_system, browser]
+    segment: {operating_system: "iOS", browser: "Safari"}
+    secondary_segments:
+      - {operating_system: "iOS", browser: "Chrome"}
+    rate_multiplier: 0.62
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {operating_system: "iOS", browser: "Safari"}
+    also_affected_segments:
+      - {operating_system: "iOS", browser: "Chrome"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.070, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change shared across iOS browsers: checkout_to_purchase_rate (purchasing_sessions/begin_checkout_sessions) dropped ~38% in iOS x Safari and ~38% in iOS x Chrome, while Android and desktop cells held flat. Mix across OS/browser is unchanged, so this is in-segment behavior. Top-3 affected cells: iOS x Safari (primary), iOS x Chrome, then a faint iOS aggregate echo. Points to a payment SDK regression on iOS WebView, not Safari-specific rendering. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Roll back / hotfix the iOS payment SDK (the WebKit-shared payment sheet) affecting both Safari and in-app Chrome on iOS; ship a canary to iOS traffic and verify Apple Pay token round-trip. Primary: checkout_to_purchase_rate; guardrails: checkout_abandonment_rate, net_revenue, aov. Size via power_analysis on iOS begin_checkout_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 61000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over the iOS Safari and iOS Chrome cells across eval_window"
+    direction: loss
+
+- scenario_id: S022
+  title: "Email + Affiliates session_conversion_rate drop from broken promo redirect"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1022
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~9% week-over-week (2.9% -> 2.6%) across the eval window despite a Black Friday traffic surge; purchasing_sessions underperformed the sessions ramp."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Email"}
+    secondary_segments:
+      - {channel_group: "Affiliates"}
+    rate_multiplier: 0.65
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Email"}
+    also_affected_segments:
+      - {channel_group: "Affiliates"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0028, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change: session_conversion_rate (purchasing_sessions/sessions) fell ~35% within Email and ~35% within Affiliates, while Direct, Organic Search, and Paid Search converted normally through Black Friday. Channel mix shift (more BF traffic) is decomposed out and contributes ~0; the effect is in-segment rate. Top-3 affected cells: Email (primary), Affiliates, then a minor Other echo. Both channels share a promo-code landing redirect, implicating a broken redirect/coupon-attach rather than seasonality. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the shared promo-redirect / coupon-attach path used by Email and Affiliate links (validate the deeplink lands on a valid cart with code applied). Primary: session_conversion_rate; guardrails: revenue_per_session, cart_abandonment_rate, net_revenue. Size via power_analysis on combined Email+Affiliates sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 54000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over the Email and Affiliates cells across eval_window"
+    direction: loss
+
+- scenario_id: S023
+  title: "Apparel + Bags + Drinkware view_to_cart_rate decline after PDP pricing change"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1023
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate fell ~10% week-over-week (28% -> 25%) over the eval window; add_to_cart_sessions down ~9% with view_item_sessions roughly flat."
+  perturbation:
+    dimension: [item_category]
+    segment: {item_category: "Apparel"}
+    secondary_segments:
+      - {item_category: "Bags"}
+      - {item_category: "Drinkware"}
+    rate_multiplier: 0.78
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {item_category: "Apparel"}
+    also_affected_segments:
+      - {item_category: "Bags"}
+      - {item_category: "Drinkware"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change across three categories: view_to_cart_rate (add_to_cart_sessions/view_item_sessions) dropped ~22% in Apparel, ~22% in Bags, and ~22% in Drinkware, while Office, Accessories, and Lifestyle held flat. Category mix is stable, so this is in-segment add-to-cart behavior, not a shift toward low-converting catalogs. Top-3 affected cells: Apparel (primary, largest volume), Bags, Drinkware. The common thread is a PDP price-display/strikethrough change applied to these catalogs post-holiday, not the January trough (post-holiday demand is decomposed out as ~0). Reconciles; significant (p<0.05)."
+  expected_recommendation: "Revert or A/B the PDP pricing-display change (strikethrough/MSRP rendering) on Apparel, Bags, and Drinkware product pages. Primary: view_to_cart_rate; guardrails: aov, cart_abandonment_rate, revenue_per_session. Size via power_analysis on combined view_item_sessions for the three categories."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 47000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_purchase_rate * aov, summed over Apparel, Bags, Drinkware across eval_window"
+    direction: loss
+
+- scenario_id: S024
+  title: "United States + Canada cart_to_checkout_rate drop from shipping-calculator bug"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1024
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-26"
+  eval_window: {start: "2020-12-26", end: "2021-01-15"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate fell ~12% week-over-week (64% -> 56%) over the eval window; begin_checkout_sessions down ~10% with add_to_cart_sessions roughly flat."
+  perturbation:
+    dimension: [country]
+    segment: {country: "United States"}
+    secondary_segments:
+      - {country: "Canada"}
+    rate_multiplier: 0.72
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "United States"}
+    also_affected_segments:
+      - {country: "Canada"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.075, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change in North America: cart_to_checkout_rate (begin_checkout_sessions/add_to_cart_sessions) fell ~28% in the United States and ~28% in Canada, while United Kingdom, Germany, and Japan stepped to checkout normally. Country mix is flat, so this is in-segment behavior, not a geo traffic-mix shift. Top-3 affected cells: United States (primary), Canada, then a minor North-America aggregate echo. Both share the USD/CAD shipping-calculator region; implicates a shipping-cost estimator failure at the cart->checkout transition, not the New Year lull. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the North American shipping-cost calculator invoked at begin_checkout for US and CA locales (verify rate-table lookup and zip/postal validation). Primary: cart_to_checkout_rate; guardrails: cart_abandonment_rate, checkout_to_purchase_rate, net_revenue. Size via power_analysis on combined US+CA add_to_cart_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 72000
+    basis: "(rate_t0 - rate_t1) * add_to_cart_sessions_t1 * downstream_purchase_rate * aov, summed over United States and Canada across eval_window"
+    direction: loss
+
+- scenario_id: S025
+  title: "Windows Chrome + Windows Edge checkout_to_purchase_rate recovery after autofill fix"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1025
+  baseline_window: {start: "2020-11-08", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-17"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate rose ~11% week-over-week (52% -> 58%) over the eval window; purchasing_sessions up ~9% with begin_checkout_sessions roughly flat."
+  perturbation:
+    dimension: [operating_system, browser]
+    segment: {operating_system: "Windows", browser: "Chrome"}
+    secondary_segments:
+      - {operating_system: "Windows", browser: "Edge"}
+    rate_multiplier: 1.30
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {operating_system: "Windows", browser: "Chrome"}
+    also_affected_segments:
+      - {operating_system: "Windows", browser: "Edge"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.060, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate IMPROVEMENT across Chromium-on-Windows: checkout_to_purchase_rate (purchasing_sessions/begin_checkout_sessions) rose ~30% in Windows x Chrome and ~30% in Windows x Edge, while Macintosh and iOS cells were unchanged. Mix is flat, so this is in-segment lift, not a favorable device-mix shift, and it persists past the Black Friday spike (seasonality decomposed to ~0). Top-3 affected cells: Windows x Chrome (primary), Windows x Edge, then a Windows aggregate echo. Consistent with a deployed Chromium autofill/address-validation fix at checkout. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Confirm the Chromium autofill/address-validation fix as the driver and extend the same payment-form improvements to non-Chromium browsers (Safari, Firefox). Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis on Windows Chrome+Edge begin_checkout_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 58000
+    basis: "(rate_t1 - rate_t0) * begin_checkout_sessions_t1 * aov, summed over Windows Chrome and Windows Edge across eval_window"
+    direction: gain
+
+- scenario_id: S026
+  title: "Paid Social + Display cart_abandonment_rate spike from forced account-creation gate"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1026
+  baseline_window: {start: "2020-12-01", end: "2020-12-19"}
+  inject_at: "2020-12-20"
+  eval_window: {start: "2020-12-20", end: "2021-01-09"}
+  target_metric: cart_abandonment_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_abandonment_rate rose ~8% week-over-week (82% -> 88.5%) over the eval window; purchasing_sessions relative to add_to_cart_sessions deteriorated while add_to_cart_sessions held flat."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Paid Social"}
+    secondary_segments:
+      - {channel_group: "Display"}
+    rate_multiplier: 1.08
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social"}
+    also_affected_segments:
+      - {channel_group: "Display"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.065, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change (a degradation): cart_abandonment_rate (1 - purchasing_sessions/add_to_cart_sessions) rose ~8 points in Paid Social and ~8 points in Display, while Direct, Organic Search, and Email abandoned at normal rates. Channel mix is flat, so the higher blended abandonment is in-segment, not driven by a swing toward cold paid traffic. Top-3 affected cells: Paid Social (primary), Display, then a minor paid-media aggregate echo. Both are cold first-touch paid audiences hitting a newly introduced forced account-creation gate before checkout; not a holiday artifact (Christmas peak decomposed to ~0). Reconciles; significant (p<0.05)."
+  expected_recommendation: "Remove or defer the forced account-creation gate for cold paid traffic (enable guest checkout for Paid Social and Display landings), then re-measure. Primary: cart_abandonment_rate; guardrails: checkout_to_purchase_rate, revenue_per_session, net_revenue. Size via power_analysis on combined Paid Social + Display add_to_cart_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 43000
+    basis: "(rate_t1 - rate_t0) * add_to_cart_sessions_t1 * aov, summed over Paid Social and Display across eval_window (incremental abandoned carts)"
+    direction: loss
+- scenario_id: S027
+  title: "Paid Social x mobile view-to-cart: rate decay compounded by share growth"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1027
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate fell ~8% over the eval window (29.0% -> 26.7%) while Paid Social mobile sessions grew their share of view_item_sessions; overall add_to_cart_sessions down ~6%."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Paid Social", device_category: "mobile"}
+    rate_multiplier: 0.78
+    volume_multiplier: 1.45
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social", device_category: "mobile"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.006, rate: -0.014, interaction: -0.003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "The 2.3pt aggregate view_to_cart_rate drop decomposes into three pieces: a behavior (rate) component of -0.014 in the Paid Social mobile cell (that cell's add_to_cart_sessions/view_item_sessions fell ~22%), a mix component of -0.006 because Paid Social mobile (a structurally low-converting cell) grew its share of view_item_sessions ~45%, and a -0.003 interaction (the enlarged share amplifies the rate decay). Rate dominates and is the actionable part; mix is an acquisition-volume effect, not in-segment behavior. Reconciles to the aggregate; significant (p<0.05)."
+  expected_recommendation: "Target the rate component: A/B test a streamlined mobile product-detail-to-cart flow (sticky add-to-cart button, default variant pre-selection) for Paid Social mobile landing traffic. Primary: view_to_cart_rate; guardrails: add_to_cart_sessions, cart_abandonment_rate, net_revenue. Size via power_analysis. Separately flag the mix shift to acquisition: the Paid Social mobile share surge dilutes blended conversion and should be reviewed by the media-buying team, not treated as a funnel defect."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 34000
+    basis: "rate-component only: (view_to_cart_rate_t0 - view_to_cart_rate_t1_holding_mix) * view_item_sessions_t1 * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S028
+  title: "Organic Search x desktop checkout-to-purchase: improving rate masked by adverse mix shift"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1028
+  baseline_window: {start: "2020-11-05", end: "2020-11-24"}
+  inject_at: "2020-11-25"
+  eval_window: {start: "2020-11-25", end: "2020-12-15"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate barely moved (62.0% -> 61.4%, ~ -1%) despite a clear in-segment improvement in Organic Search desktop checkout completion; the flat aggregate hides offsetting mix and rate forces."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Organic Search", device_category: "desktop"}
+    rate_multiplier: 1.18
+    volume_multiplier: 0.65
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Organic Search", device_category: "desktop"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.020, rate: 0.016, interaction: -0.002}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Mix and rate push in OPPOSITE directions, so the ~0.6pt aggregate dip understates what happened. The Organic Search desktop cell's checkout_to_purchase_rate actually IMPROVED (purchasing_sessions/begin_checkout_sessions up ~18%, contributing rate=+0.016), but that high-converting cell's share of begin_checkout_sessions shrank ~35% (contributing mix=-0.020), with a -0.002 interaction. The net is slightly negative purely because composition deteriorated. The behavior here is favorable, not a defect; the actionable issue is the volume loss of a strong-converting segment. Critic must refute any 'checkout is broken' framing: in-segment rate is up. Reconciles; the aggregate move is not statistically significant on its own, but the decomposed components are (p<0.05)."
+  expected_recommendation: "Do NOT change the checkout flow for this segment; the rate component is an improvement worth preserving and rolling out. The actionable problem is mix: Organic Search desktop begin_checkout volume fell ~35%, an acquisition/SEO matter. Route to the organic-traffic team to investigate ranking/landing-page volume loss. If a funnel test is run, hold checkout_to_purchase_rate as a guardrail to ensure the gain is protected; track begin_checkout_sessions and net_revenue as primary recovery metrics."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 41000
+    basis: "mix-component only (the actionable loss): (begin_checkout_sessions_t0_share - begin_checkout_sessions_t1_share) * total_begin_checkout_sessions_t1 * cell_checkout_to_purchase_rate * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S029
+  title: "Email x United States cart-to-checkout: rate lift and share gain reinforce (improvement)"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1029
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate rose ~7% over the eval window (48.0% -> 51.3%); Email US carts both converted to checkout at a higher rate and grew their share of add_to_cart_sessions."
+  perturbation:
+    dimension: [channel_group, country]
+    segment: {channel_group: "Email", country: "United States"}
+    rate_multiplier: 1.22
+    volume_multiplier: 1.30
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Email", country: "United States"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: 0.011, rate: 0.018, interaction: 0.004}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Positive anomaly: the 3.3pt aggregate cart_to_checkout_rate lift decomposes into rate=+0.018 (Email US begin_checkout_sessions/add_to_cart_sessions up ~22% in-cell), mix=+0.011 (Email US, a high-converting cell, grew its share of add_to_cart_sessions ~30%), and a reinforcing +0.004 interaction. Rate is the dominant and actionable behavioral driver; mix is favorable acquisition. All three terms point the same direction, so the aggregate move is genuine and not a confound. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Capture the behavioral win: codify whatever changed in the Email US cart-to-checkout path (likely a checkout CTA or shipping-promo in the email landing flow) and A/B test rolling it to other channels/countries. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. The mix gain (Email US share growth) is an acquisition success for the lifecycle team to sustain, tracked separately from the funnel change. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 29000
+    basis: "rate-component upside: (cart_to_checkout_rate_t1_holding_mix - cart_to_checkout_rate_t0) * add_to_cart_sessions_t1 * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: gain
+
+- scenario_id: S030
+  title: "Display x Android session conversion: rate collapse partially offset by share retreat"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1030
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-25"
+  eval_window: {start: "2020-12-25", end: "2021-01-14"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~5% over the eval window (3.10% -> 2.95%); Display Android sessions converted far worse but also lost session share, so the aggregate damage is muted relative to the in-cell collapse."
+  perturbation:
+    dimension: [channel_group, operating_system]
+    segment: {channel_group: "Display", operating_system: "Android"}
+    rate_multiplier: 0.60
+    volume_multiplier: 0.80
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Display", operating_system: "Android"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: 0.004, rate: -0.0017, interaction: 0.0003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Mix and rate push in OPPOSITE directions. The Display Android cell's session_conversion_rate (purchasing_sessions/sessions) collapsed ~40% in-cell, contributing rate=-0.0017 to the aggregate; but because that now-poor cell simultaneously LOST ~20% of its session share, mix=+0.004 partially offsets the damage, with a +0.0003 interaction. Net aggregate is ~ -0.0015 (the small reported dip). The actionable defect is the rate collapse, not the (helpful) volume retreat. A naive aggregate read would understate the behavioral problem because the mix shift is masking it. Critic must surface that the in-cell rate fell ~40% even though the headline only moved ~5%. Reconciles; cell-level rate change significant (p<0.05)."
+  expected_recommendation: "Address the rate component: investigate the Display Android landing/checkout experience for a tracking or creative-mismatch regression (e.g., broken deep-link, slow render) that crushed in-cell conversion. A/B test a fixed Android landing flow. Primary: session_conversion_rate; guardrails: engagement_rate, cart_abandonment_rate, net_revenue. The mix retreat (Display Android losing share) is an acquisition/media-pacing effect and is currently cushioning the blended metric; do not optimize for it. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 22000
+    basis: "rate-component only: (session_conversion_rate_t0 - session_conversion_rate_t1_holding_mix) * sessions_t1 * aov, summed over eval_window for the Display Android cell"
+    direction: loss
+
+- scenario_id: S031
+  title: "Referral x tablet add-shipping completion: rate drop and share growth in a weak cell"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1031
+  baseline_window: {start: "2020-11-10", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-20"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~9% over the eval window (60.0% -> 54.5%); Referral tablet checkouts both completed at a lower rate and grew their share of begin_checkout_sessions."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Referral", device_category: "tablet"}
+    rate_multiplier: 0.70
+    volume_multiplier: 1.55
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral", device_category: "tablet"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.018, rate: -0.030, interaction: -0.007}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "The 5.5pt aggregate checkout_to_purchase_rate drop decomposes into rate=-0.030 (Referral tablet purchasing_sessions/begin_checkout_sessions down ~30% in-cell), mix=-0.018 (this low-completing cell grew its share of begin_checkout_sessions ~55%), and a sizeable -0.007 interaction (the enlarged share multiplies the rate decay â€” exactly the interaction term this bucket tests). Rate is the dominant and actionable component; mix is an acquisition-mix effect; the interaction is non-trivial here and must be reported separately rather than folded into either main term. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the behavioral defect: audit the Referral tablet add_shipping_info -> payment -> purchase path for a layout/validation bug on tablet viewports that is dropping completion. A/B test a tablet-optimized checkout. Primary: checkout_to_purchase_rate; guardrails: add_shipping_info_sessions, add_payment_info_sessions, net_revenue. Flag the mix growth (Referral tablet begin_checkout share up ~55%) to acquisition as a separate item; because mix, rate, and interaction all compound negatively, recovering the rate alone reclaims the majority of the loss. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 47000
+    basis: "rate-plus-interaction components (the actionable behavioral portion): (rate_t0 - rate_t1) applied to Referral tablet begin_checkout_sessions_t1 * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S032
+  title: "Paid Search x India view-to-cart: in-cell rate gain offset by collapsing share"
+  bucket: multi_segment_mixed
+  anomaly_type: mixed
+  seed: 1032
+  baseline_window: {start: "2021-01-02", end: "2021-01-16"}
+  inject_at: "2021-01-17"
+  eval_window: {start: "2021-01-17", end: "2021-01-31"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate slipped ~4% over the eval window (28.0% -> 26.9%) even though the Paid Search India cell's view-to-cart rate rose; a steep share loss in that cell drove the net negative."
+  perturbation:
+    dimension: [channel_group, country]
+    segment: {channel_group: "Paid Search", country: "India"}
+    rate_multiplier: 1.15
+    volume_multiplier: 0.55
+    hold_constant: []
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Search", country: "India"}
+    dominant_effect: mixed
+    mix_rate_interaction: {mix: -0.017, rate: 0.009, interaction: -0.003}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "A classic confound where mix and rate OPPOSE. The Paid Search India cell's view_to_cart_rate (add_to_cart_sessions/view_item_sessions) actually rose ~15% in-cell (rate=+0.009), but the cell's share of view_item_sessions collapsed ~45% (mix=-0.017), with a -0.003 interaction; the net aggregate is ~ -0.011 (the small reported slip). The behavioral signal is positive and should not be touched; the actionable problem is the volume/acquisition loss of Paid Search India traffic. Critic must refute any 'product page is converting worse' narrative â€” in-cell rate improved. Reconciles; mix component significant (p<0.05), aggregate move modest."
+  expected_recommendation: "Preserve the rate behavior (it improved) and consider replicating the Paid Search India product-page change in other geos. The actionable issue is mix: Paid Search India view_item volume fell ~45%, a paid-acquisition/budget-pacing matter â€” route to the SEM team to investigate bid/budget or geo-targeting changes. If any funnel test runs, hold view_to_cart_rate as a guardrail to protect the gain; track view_item_sessions and net_revenue as the primary recovery metrics for the lost volume."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 18000
+    basis: "mix-component only (the actionable loss): (view_item_sessions_t0_share - view_item_sessions_t1_share) * total_view_item_sessions_t1 * cell_view_to_cart_rate * downstream_purchase_propensity * aov, summed over eval_window"
+    direction: loss
+- scenario_id: S033
+  title: "Post-holiday January conversion dip (post-holiday trough decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1033
+  baseline_window: {start: "2020-12-20", end: "2020-12-25"}
+  inject_at: "2021-01-02"
+  eval_window: {start: "2021-01-02", end: "2021-01-15"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~22% versus the Christmas peak (3.2% -> 2.5%) across the first two weeks of January; purchasing_sessions down ~28% over the eval window."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "post-holiday January trough 2021-01-02..2021-01-15"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~22% session_conversion_rate decline is fully explained by the post-holiday January trough (2021-01-02..2021-01-15): purchase intent collapses store-wide after the Christmas gifting peak. The apparent ~28% purchasing_sessions drop matches the prior-year seasonal pattern in the seasonality_calendar; no single segment drives it and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected seasonal post-holiday trough; apparent ~28% purchasing_sessions decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S034
+  title: "Black Friday revenue spike (Black Friday decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1034
+  baseline_window: {start: "2020-11-16", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-11-29"}
+  target_metric: revenue
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate revenue surged ~180% over Black Friday weekend versus the prior 10-day baseline; transactions up ~150% and revenue_per_session up ~35%."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Black Friday 2020-11-27"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~180% revenue surge is fully explained by Black Friday (2020-11-27): promotional demand lifts transactions and revenue_per_session store-wide. The apparent spike aligns with the Black Friday entry in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; this is an expected seasonal lift, NOT an actionable improvement to attribute to any change."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Black Friday promotional lift; apparent ~180% revenue spike is non-actionable seasonality, not injected gain."
+    direction: none
+
+- scenario_id: S035
+  title: "Cyber Monday traffic surge diluting conversion (looks like mix-shift, is seasonal)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1035
+  baseline_window: {start: "2020-11-20", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-02"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~18% on Cyber Monday (3.0% -> 2.5%) even as sessions surged ~120%; the shift in channel/device mix toward lower-intent Paid Search and Display traffic looks like a composition change."
+  perturbation:
+    dimension: [day, channel_group]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Cyber Monday 2020-11-30"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~18% session_conversion_rate dip is fully explained by Cyber Monday (2020-11-30): a ~120% sessions surge brings disproportionately more top-of-funnel Paid Search and Display visitors, mechanically diluting the aggregate rate. This resembles a mix-shift but is the expected Cyber Monday traffic composition recurring in the seasonality_calendar; no injected per-segment rate change exists and the decomposed mix/rate/interaction are all flat once normalized against the seasonal baseline. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Cyber Monday traffic-mix dilution; apparent ~18% conversion dip is non-actionable seasonality, not an injected mix-shift."
+    direction: none
+
+- scenario_id: S036
+  title: "January AOV trough (post-holiday January decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1036
+  baseline_window: {start: "2020-12-15", end: "2020-12-25"}
+  inject_at: "2021-01-05"
+  eval_window: {start: "2021-01-05", end: "2021-01-15"}
+  target_metric: aov
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate aov fell ~17% versus the Christmas window ($72 -> $60) in early-mid January; revenue_per_user down ~20% as basket sizes shrink after the gifting season."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "post-holiday January trough 2021-01-02..2021-01-15"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~17% aov decline is fully explained by the post-holiday January trough (2021-01-02..2021-01-15): multi-item gift baskets give way to smaller single-item self-purchases, lowering aov and revenue_per_user store-wide. The drop tracks the prior-year January pattern in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected post-holiday January AOV trough; apparent ~17% aov decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S037
+  title: "Christmas shipping cutoff purchase drop (Christmas peak decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1037
+  baseline_window: {start: "2020-12-10", end: "2020-12-19"}
+  inject_at: "2020-12-23"
+  eval_window: {start: "2020-12-23", end: "2020-12-25"}
+  target_metric: purchasing_sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate purchasing_sessions fell ~40% over 12-23..12-25 versus the early-December baseline as orders can no longer arrive by Christmas; checkout_to_purchase_rate also down ~15% in the same window."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Christmas peak 2020-12-20..2020-12-25"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~40% purchasing_sessions decline over 2020-12-23..2020-12-25 is fully explained by the Christmas shipping cutoff at the tail of the Christmas peak (2020-12-20..2020-12-25): shoppers stop ordering once delivery can no longer arrive by Christmas, so purchases and checkout_to_purchase_rate fall store-wide. The pattern matches the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Christmas shipping-cutoff demand drop; apparent ~40% purchasing_sessions decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S038
+  title: "New Year traffic and conversion dip (New Year decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1038
+  baseline_window: {start: "2020-12-26", end: "2020-12-31"}
+  inject_at: "2021-01-01"
+  eval_window: {start: "2021-01-01", end: "2021-01-03"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate sessions fell ~30% on New Year's Day versus the late-December baseline, with view_item_sessions down ~33% and session_conversion_rate down ~12% as shoppers step away over the holiday."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "New Year 2021-01-01"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~30% sessions decline around 2021-01-01 is fully explained by the New Year holiday: traffic and browsing (view_item_sessions) drop store-wide as shoppers are away, and session_conversion_rate softens with the lower-intent residual traffic. The dip aligns with the New Year entry in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected New Year holiday traffic lull; apparent ~30% sessions decline is non-actionable seasonality, not injected loss."
+    direction: none
+- scenario_id: S039
+  title: "Session conversion rate steady â€” within-noise wiggle, no anomaly"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1039
+  baseline_window: {start: "2020-11-08", end: "2020-11-21"}
+  inject_at: "2020-11-22"
+  eval_window: {start: "2020-11-22", end: "2020-11-26"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "session_conversion_rate moved 1.9% -> 2.0% week-over-week, comfortably inside the forecast prediction interval; sessions and purchasing_sessions both flat within normal day-to-day variation."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 1.9% -> 2.0% movement in session_conversion_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S040
+  title: "View-to-cart rate stable â€” benign mid-November noise"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1040
+  baseline_window: {start: "2020-11-01", end: "2020-11-14"}
+  inject_at: "2020-11-15"
+  eval_window: {start: "2020-11-15", end: "2020-11-20"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "view_to_cart_rate ticked 12.4% -> 12.6% week-over-week; add_to_cart_sessions and view_item_sessions tracked their usual ratio inside the prediction interval, no segment standing out."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 12.4% -> 12.6% movement in view_to_cart_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S041
+  title: "AOV flat â€” quiet early-December control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1041
+  baseline_window: {start: "2020-12-01", end: "2020-12-12"}
+  inject_at: "2020-12-13"
+  eval_window: {start: "2020-12-13", end: "2020-12-18"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "aov drifted $58.20 -> $58.90 week-over-week, well inside the forecast prediction interval; transactions and revenue moved proportionally with no unusual segment."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the $58.20 -> $58.90 movement in aov is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S042
+  title: "Cart-to-checkout rate steady â€” mid-January control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1042
+  baseline_window: {start: "2021-01-04", end: "2021-01-17"}
+  inject_at: "2021-01-18"
+  eval_window: {start: "2021-01-18", end: "2021-01-23"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "cart_to_checkout_rate held at 64.1% -> 63.8% week-over-week, a swing fully contained by the forecast prediction interval; begin_checkout_sessions and add_to_cart_sessions varied only with normal volume noise."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 64.1% -> 63.8% movement in cart_to_checkout_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S043
+  title: "Engagement rate stable â€” late-January control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1043
+  baseline_window: {start: "2021-01-11", end: "2021-01-24"}
+  inject_at: "2021-01-25"
+  eval_window: {start: "2021-01-25", end: "2021-01-30"}
+  target_metric: engagement_rate
+  funnel_step: {numerator: engaged_sessions, denominator: sessions}
+  anomaly: "engagement_rate moved 55.6% -> 55.9% week-over-week, inside the forecast prediction interval; engaged_sessions and sessions both within normal variation, no segment driving it."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 55.6% -> 55.9% movement in engagement_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S044
+  title: "Revenue per session flat â€” early-December control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1044
+  baseline_window: {start: "2020-12-03", end: "2020-12-14"}
+  inject_at: "2020-12-15"
+  eval_window: {start: "2020-12-15", end: "2020-12-19"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "revenue_per_session nudged $1.16 -> $1.18 week-over-week, comfortably inside the forecast prediction interval; revenue and sessions moved together with no anomalous cell."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the $1.16 -> $1.18 movement in revenue_per_session is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+- scenario_id: S045
+  title: "transaction_id duplication inflating revenue and aov on desktop"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1045
+  baseline_window: {start: "2020-11-15", end: "2020-12-05"}
+  inject_at: "2020-12-06"
+  eval_window: {start: "2020-12-06", end: "2020-12-26"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate revenue jumped ~28% and aov rose ~22% ($61 -> $74) week-over-week on desktop, with no corresponding rise in purchasing_sessions; transactions appear inflated."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "transaction_id duplication: a subset of desktop orders ingested twice (duplicate transaction_id rows), double-counting transactions and revenue while purchasing_sessions stays flat"
+    hold_constant: [sessions, purchasing_sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "desktop"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "transaction_id duplication data-quality issue, not a behavior change; the revenue/aov move is spurious. Duplicate transaction_id rows on desktop double-count transactions and revenue (~28% apparent revenue lift, aov $61 -> $74) while purchasing_sessions is unchanged, so per-session economics did not actually improve. Critic refutes: dedup transaction_id and the swing disappears."
+  expected_recommendation: "Fix the data pipeline: deduplicate on transaction_id (keep first ingest), exclude the affected desktop partition, and re-run the diagnosis. Do NOT launch an experiment off the inflated aov."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; apparent +28% revenue / +22% aov is a duplication artifact, not real demand"
+    direction: none
+
+- scenario_id: S046
+  title: "NULL spike: source collapses to (not set) for a traffic chunk"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1046
+  baseline_window: {start: "2020-12-01", end: "2020-12-18"}
+  inject_at: "2020-12-19"
+  eval_window: {start: "2020-12-19", end: "2021-01-08"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "A large block of sessions shows source = '(not set)' starting 2020-12-19, making attributed channels appear to lose ~18% of their sessions overnight while '(not set)' balloons."
+  perturbation:
+    dimension: [source]
+    segment: {source: "(not set)"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "NULL spike: a tracking/attribution gap stamps source as '(not set)' for a chunk of otherwise-valid traffic, so sessions are mis-bucketed rather than lost"
+    hold_constant: [sessions, users, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {source: "(not set)"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "NULL-spike data-quality issue, not a behavior change; the apparent ~18% session loss in attributed channels is spurious. Sessions were re-labeled source = '(not set)' by an attribution gap, not actually lost (total sessions and session_conversion_rate are flat). Critic refutes: the missing channel sessions exactly reappear in the '(not set)' bucket."
+  expected_recommendation: "Fix the data pipeline: repair source attribution / backfill the '(not set)' partition, exclude it from channel-level diagnosis, and re-run. Do NOT launch an experiment on a channel that did not actually decline."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~18% apparent channel-session drop is a NULL-attribution artifact, total sessions unchanged"
+    direction: none
+
+- scenario_id: S047
+  title: "Late-arriving shard: one-day dip across ALL metrics"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1047
+  baseline_window: {start: "2020-12-20", end: "2021-01-02"}
+  inject_at: "2021-01-03"
+  eval_window: {start: "2021-01-03", end: "2021-01-20"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "On 2021-01-03 every metric (sessions, users, transactions, revenue) drops ~40% for a single day then fully recovers the next day, producing an apparent one-day store-wide collapse."
+  perturbation:
+    dimension: [day]
+    segment: {day: "2021-01-03"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "late-arriving / partially-missing event_date shard: one day's export landed only partially at query time, so all metrics for that single day are under-counted across every dimension uniformly"
+    hold_constant: [session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {day: "2021-01-03"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Late-arriving shard data-quality issue, not a behavior change; the one-day ~40% drop across all metrics is spurious. A single event_date partition is partially loaded, so volumes are uniformly under-counted on 2021-01-03 while ratio metrics (session_conversion_rate, aov) are unchanged and neighboring days are normal. Critic refutes: dip is confined to one partition and is not segment-specific."
+  expected_recommendation: "Fix the data pipeline: wait for / backfill the 2021-01-03 shard, exclude that partition from the eval window, and re-run. Do NOT launch an experiment off a single under-loaded day."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~40% one-day drop is a missing-partition artifact that backfills, not lost revenue"
+    direction: none
+
+- scenario_id: S048
+  title: "Bot/spam traffic spike inflating sessions, diluting conversion"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1048
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Sessions surged ~35% on Referral / desktop while purchasing_sessions held flat, so session_conversion_rate appears to fall ~26% (2.7% -> 2.0%); looks like an unfavorable mix-shift toward low-converting traffic."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Referral", device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "bot/spam traffic spike: non-human sessions inflate sessions/users on Referral desktop with zero downstream funnel events, diluting session_conversion_rate; junk volume, not a real audience-mix change"
+    hold_constant: [purchasing_sessions, transactions, revenue]
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral", device_category: "desktop"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Bot/spam traffic data-quality issue, not a behavior change; the ~26% session_conversion_rate dilution is spurious. The Referral-desktop session surge has no add_to_cart/begin_checkout/purchasing activity, so it is junk traffic inflating the denominator, not a genuine low-converting mix-shift. Critic refutes: purchasing_sessions, transactions and revenue are unchanged."
+  expected_recommendation: "Fix the data pipeline: apply bot filtering / exclude the Referral-desktop spam sessions and re-run. Do NOT launch an experiment to 'recover' a conversion rate that only dropped because of junk traffic."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~26% apparent conversion dilution is bot-inflated sessions in the denominator, real purchases unchanged"
+    direction: none
+
+- scenario_id: S049
+  title: "Tracking regression: add_to_cart stops firing on Safari"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1049
+  baseline_window: {start: "2020-12-10", end: "2020-12-28"}
+  inject_at: "2020-12-29"
+  eval_window: {start: "2020-12-29", end: "2021-01-18"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "On Safari, view_to_cart_rate appears to collapse ~60% (14% -> 5.5%) starting 2020-12-29 while view_item_sessions, begin_checkout_sessions, purchasing_sessions and revenue on Safari are unchanged."
+  perturbation:
+    dimension: [browser]
+    segment: {browser: "Safari"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "tracking regression: the add_to_cart event stops firing on Safari (instrumentation bug), so add_to_cart_sessions is under-reported and view_to_cart_rate looks like it collapsed even though downstream checkout/purchase volumes are intact"
+    hold_constant: [view_item_sessions, begin_checkout_sessions, purchasing_sessions, revenue]
+  ground_truth:
+    root_cause_segment: {browser: "Safari"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Tracking-regression data-quality issue, not a behavior change; the ~60% Safari view_to_cart_rate collapse is spurious. add_to_cart stopped firing on Safari, so the numerator is under-counted, yet begin_checkout_sessions and purchasing_sessions on Safari are unchanged - impossible if users had truly stopped adding to cart. Critic refutes: the funnel is internally inconsistent (downstream > implied upstream)."
+  expected_recommendation: "Fix the data pipeline / instrumentation: restore the Safari add_to_cart event and backfill, or exclude Safari from view_to_cart_rate diagnosis, then re-run. Do NOT launch an experiment on a cart step that did not actually regress."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~60% apparent view_to_cart_rate drop is a missing add_to_cart event, downstream purchases and revenue intact"
+    direction: none
+
+- scenario_id: S050
+  title: "_in_usd revenue null understating revenue for India"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1050
+  baseline_window: {start: "2020-11-10", end: "2020-11-28"}
+  inject_at: "2020-11-29"
+  eval_window: {start: "2020-11-29", end: "2020-12-19"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Revenue and revenue_per_session for India appear to fall ~70% (revenue_per_session $0.40 -> $0.12) starting 2020-11-29 while transactions, purchasing_sessions and items_per_transaction for India are unchanged."
+  perturbation:
+    dimension: [country]
+    segment: {country: "India"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "_in_usd revenue null/zero: the USD currency-converted revenue field is null/zero for India orders, so revenue (and revenue_per_session/aov) is understated even though transaction counts and purchase volume are correct"
+    hold_constant: [transactions, purchasing_sessions, sessions, items_per_transaction]
+  ground_truth:
+    root_cause_segment: {country: "India"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "_in_usd revenue-null data-quality issue, not a behavior change; the ~70% India revenue / revenue_per_session drop is spurious. The USD-converted revenue field is null/zero for India orders so monetary metrics are understated, yet transactions, purchasing_sessions and items_per_transaction are unchanged - revenue cannot fall while purchase counts hold. Critic refutes: the monetary-vs-volume metrics are inconsistent."
+  expected_recommendation: "Fix the data pipeline: repair/backfill the _in_usd currency conversion for India and re-run, or exclude India revenue metrics until corrected. Do NOT launch an experiment off understated revenue."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~70% apparent India revenue drop is a null _in_usd conversion artifact, real transactions unchanged"
+    direction: none

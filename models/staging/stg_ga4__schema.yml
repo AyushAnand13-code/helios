@@ -1,0 +1,57 @@
+# models/staging/stg_ga4__schema.yml
+version: 2
+
+models:
+  - name: stg_ga4__events
+    description: "1:1 typed/renamed GA4 events; one row per event. session_key surfaced via sessionize()."
+    columns:
+      - name: session_key
+        description: "TO_HEX(MD5(user_pseudo_id || '-' || ga_session_id)). Null only when ga_session_id is null."
+        data_tests:
+          - not_null:
+              # GA4 emits a few session-less events (e.g. first_open) with null ga_session_id
+              config: {where: "ga_session_id is not null"}
+      - name: event_date
+        description: "Event date parsed from the _TABLE_SUFFIX shard (DATE). Partition key for downstream facts."
+        data_tests: [not_null]
+      - name: event_timestamp
+        description: "Event time (TIMESTAMP, from timestamp_micros)."
+        data_tests: [not_null]
+      - name: user_pseudo_id
+        description: "Device/cookie pseudo id; the de facto user grain (user_id is null on this sample)."
+        data_tests: [not_null]
+      - name: ga_session_id
+        description: "GA4 session id within a user, from event_params.ga_session_id."
+      - name: page_location
+        description: "Full page URL of the event, from event_params.page_location."
+      - name: event_source
+        description: "SESSION-SCOPED source from event_params.source (preferred over first_touch_source)."
+      - name: event_medium
+        description: "SESSION-SCOPED medium from event_params.medium."
+      - name: device_category
+        description: "device.category: mobile / desktop / tablet."
+      - name: country
+        description: "geo.country."
+      - name: transaction_id
+        description: "ecommerce.transaction_id; non-null only on purchase events."
+      - name: purchase_revenue_in_usd
+        description: "ecommerce.purchase_revenue_in_usd (USD only, per money convention)."
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              config: {where: "purchase_revenue_in_usd is not null"}
+
+  - name: stg_ga4__event_params
+    description: "Fully unnested event_params at (event x param key) grain; the only place UNNEST(event_params) lives."
+    columns:
+      - name: param_key
+        description: "event_params[].key."
+        data_tests: [not_null]
+      - name: event_timestamp
+        description: "Event time (TIMESTAMP)."
+        data_tests: [not_null]
+      - name: user_pseudo_id
+        description: "Device/cookie pseudo id."
+        data_tests: [not_null]
+      - name: value_string
+        description: "Coalesced string projection of the populated value slot."

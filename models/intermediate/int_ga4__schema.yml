@@ -1,0 +1,32 @@
+# models/intermediate/int_ga4__schema.yml
+version: 2
+
+models:
+  - name: int_ga4__sessionized
+    description: "KEYSTONE. One row per session; session-scoped source/medium (traffic_source fallback), channel_group, engagement, new/returning."
+    columns:
+      - name: session_key
+        data_tests: [not_null, unique]
+      - name: channel_group
+        description: "From channel_group_case(); one of the 10 canonical groups."
+        data_tests:
+          - accepted_values:
+              values: ['Direct','Organic Search','Paid Search','Display','Paid Social',
+                       'Organic Social','Email','Affiliates','Referral','Other']
+      - name: engaged_session
+        data_tests: [not_null]
+      - name: is_new_user
+        data_tests: [not_null]
+
+  - name: int_ga4__funnel_steps
+    description: "KEYSTONE. One row per session; reached_* MAX-DOWNSTREAM monotonic flags + deduped session_revenue."
+    columns:
+      - name: session_key
+        data_tests: [not_null, unique]
+      - name: reached_view_item
+        data_tests: [not_null]
+      - name: reached_purchase
+        data_tests: [not_null]
+      - name: session_revenue
+        data_tests:
+          - dbt_utils.accepted_range: {min_value: 0}

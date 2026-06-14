@@ -1,0 +1,6 @@
+# Helios MCP server registry — STUB (finalized in M6).
+# In M6 this declares the warehouse-mcp / semantic-mcp servers and points
+# `registry:` at models/semantic/semantic_layer.yaml. For now it only needs to exist.
+servers: {}
+  # TODO (M6): add semantic-mcp + warehouse-mcp entries; wire registry to
+  #            models/semantic/semantic_layer.yaml and the warehouse HTTP endpoint.

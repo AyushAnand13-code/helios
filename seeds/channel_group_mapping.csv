@@ -1,0 +1,19 @@
+source,medium,channel_group
+(direct),(none),Direct
+google,cpc,Paid Search
+bing,cpc,Paid Search
+google,organic,Organic Search
+bing,organic,Organic Search
+facebook,cpc,Paid Social
+instagram,paid,Paid Social
+facebook,social,Organic Social
+instagram,social,Organic Social
+youtube,social,Organic Social
+dv360,display,Display
+google,display,Display
+email,email,Email
+newsletter,email,Email
+partner,affiliate,Affiliates
+some-blog,referral,Referral
+t.co,referral,Referral
+other,unknown,Other

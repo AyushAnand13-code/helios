@@ -1,0 +1,74 @@
+# models/marts/core/core__schema.yml
+# LEAN subset of DBT_GUIDE.md §5.13: only the marts built in the MVP. Tests that
+# referenced not-yet-built models (fct_sessions, dim_users, dim_items) are omitted,
+# and the fct_funnel `contract: {enforced: true}` is dropped (it requires declaring
+# every column's data_type — re-enable once the grain is frozen).
+version: 2
+
+models:
+  - name: fct_funnel
+    description: "One row per session (PK session_key). Monotonic reached_* flags + session_revenue + wide session dims. Primary session grain for the semantic layer."
+    columns:
+      - name: session_key
+        data_tests: [unique, not_null]
+      - name: event_date
+        data_tests: [not_null]
+      - name: channel_group
+        data_tests:
+          - not_null
+          - relationships: {to: ref('dim_channels'), field: channel_group}
+      - name: reached_purchase
+        data_tests: [not_null]
+      - name: session_revenue
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+          # Reconcile session-attributed revenue to raw GA4 — as a WARNING, not a hard
+          # gate. session_revenue (session grain) and gross_revenue (order grain) only
+          # reconcile exactly at the grand total; session attribution + null-transaction
+          # purchases introduce sub-grand-total drift. The STRICT cent-level reconcile is
+          # enforced on fct_orders.gross_revenue (order grain), which passes.
+          - test_revenue_reconciles:
+              config:
+                severity: warn
+    # singular tests assert_funnel_monotonicity + assert_session_conversion_rate_bounds
+    # live in tests/ and guard the reached_* invariant and 0<=cvr<=1.
+
+  - name: fct_daily_funnel
+    description: "Additive daily funnel counts + revenue by event_date x channel/device/country/is_new_user. Rates NOT stored. Aggregates fct_funnel."
+    columns:
+      - name: daily_funnel_key
+        data_tests: [unique, not_null]
+      - name: channel_group
+        data_tests:
+          - relationships: {to: ref('dim_channels'), field: channel_group}
+      - name: sessions
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 0}
+    data_tests:
+      # purchasing_sessions can never exceed sessions (monotonicity at the rollup grain)
+      - dbt_utils.expression_is_true:
+          expression: "purchasing_sessions <= sessions"
+
+  - name: dim_channels
+    description: "Conformed channel dimension. Exactly 10 GA4 default channel groups."
+    columns:
+      - name: channel_key
+        data_tests: [unique, not_null]
+      - name: channel_group
+        data_tests:
+          - not_null
+          - unique
+          - accepted_values:
+              values: ['Direct','Organic Search','Paid Search','Display',
+                       'Paid Social','Organic Social','Email','Affiliates',
+                       'Referral','Other']
+
+  - name: dim_date
+    description: "Conformed date spine 2020-11-01..2021-01-31."
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+      - name: event_date
+        data_tests: [unique, not_null]

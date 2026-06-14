@@ -1,0 +1,179 @@
+- scenario_id: S039
+  title: "Session conversion rate steady — within-noise wiggle, no anomaly"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1039
+  baseline_window: {start: "2020-11-08", end: "2020-11-21"}
+  inject_at: "2020-11-22"
+  eval_window: {start: "2020-11-22", end: "2020-11-26"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "session_conversion_rate moved 1.9% -> 2.0% week-over-week, comfortably inside the forecast prediction interval; sessions and purchasing_sessions both flat within normal day-to-day variation."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 1.9% -> 2.0% movement in session_conversion_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S040
+  title: "View-to-cart rate stable — benign mid-November noise"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1040
+  baseline_window: {start: "2020-11-01", end: "2020-11-14"}
+  inject_at: "2020-11-15"
+  eval_window: {start: "2020-11-15", end: "2020-11-20"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "view_to_cart_rate ticked 12.4% -> 12.6% week-over-week; add_to_cart_sessions and view_item_sessions tracked their usual ratio inside the prediction interval, no segment standing out."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 12.4% -> 12.6% movement in view_to_cart_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S041
+  title: "AOV flat — quiet early-December control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1041
+  baseline_window: {start: "2020-12-01", end: "2020-12-12"}
+  inject_at: "2020-12-13"
+  eval_window: {start: "2020-12-13", end: "2020-12-18"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "aov drifted $58.20 -> $58.90 week-over-week, well inside the forecast prediction interval; transactions and revenue moved proportionally with no unusual segment."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the $58.20 -> $58.90 movement in aov is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S042
+  title: "Cart-to-checkout rate steady — mid-January control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1042
+  baseline_window: {start: "2021-01-04", end: "2021-01-17"}
+  inject_at: "2021-01-18"
+  eval_window: {start: "2021-01-18", end: "2021-01-23"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "cart_to_checkout_rate held at 64.1% -> 63.8% week-over-week, a swing fully contained by the forecast prediction interval; begin_checkout_sessions and add_to_cart_sessions varied only with normal volume noise."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 64.1% -> 63.8% movement in cart_to_checkout_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S043
+  title: "Engagement rate stable — late-January control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1043
+  baseline_window: {start: "2021-01-11", end: "2021-01-24"}
+  inject_at: "2021-01-25"
+  eval_window: {start: "2021-01-25", end: "2021-01-30"}
+  target_metric: engagement_rate
+  funnel_step: {numerator: engaged_sessions, denominator: sessions}
+  anomaly: "engagement_rate moved 55.6% -> 55.9% week-over-week, inside the forecast prediction interval; engaged_sessions and sessions both within normal variation, no segment driving it."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the 55.6% -> 55.9% movement in engagement_rate is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none
+
+- scenario_id: S044
+  title: "Revenue per session flat — early-December control window"
+  bucket: no_anomaly_control
+  anomaly_type: none
+  seed: 1044
+  baseline_window: {start: "2020-12-03", end: "2020-12-14"}
+  inject_at: "2020-12-15"
+  eval_window: {start: "2020-12-15", end: "2020-12-19"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "revenue_per_session nudged $1.16 -> $1.18 week-over-week, comfortably inside the forecast prediction interval; revenue and sessions moved together with no anomalous cell."
+  perturbation:
+    dimension: []
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "No material change; the $1.16 -> $1.18 movement in revenue_per_session is within the forecast prediction interval / normal noise. Monitor should NOT flag."
+  expected_recommendation: "None."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "No actionable change; movement is within control limits, so no revenue is at risk."
+    direction: none

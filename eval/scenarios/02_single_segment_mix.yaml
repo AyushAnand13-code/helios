@@ -1,0 +1,299 @@
+- scenario_id: S011
+  title: "Desktop->mobile share shift drags aggregate session_conversion_rate (rates flat)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1011
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~9% over the eval window (2.6% -> 2.4%) even though every device's own conversion rate is unchanged; mobile's session share rose from ~46% to ~58%."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: null
+    volume_multiplier: 1.6
+    hold_constant: [session_conversion_rate, view_to_cart_rate, cart_to_checkout_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0018, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Pure MIX-shift / composition change, NOT a funnel-behavior change. Each device's session_conversion_rate is flat; the aggregate fell only because session share moved toward lower-converting mobile (share ~46% -> ~58%). Per-segment rates reconcile exactly; the apparent ~9% aggregate drop is fully explained by mix. Do NOT 'fix the checkout' - the checkout is working as before."
+  expected_recommendation: "Rebalance acquisition: this is a traffic-quality/mix problem, not a UX bug. Audit why mobile share surged (campaign creative, device targeting, or budget reallocation) and shift paid spend back toward higher-converting desktop audiences, or improve mobile traffic targeting. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. Do NOT run a checkout-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 42000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, where the rate delta is driven entirely by device session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S012
+  title: "Paid Search->Display share shift lowers aggregate session_conversion_rate"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1012
+  baseline_window: {start: "2020-11-08", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-15"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~12% over the eval window (3.0% -> 2.65%); each channel's own conversion rate held steady while Display's session share roughly doubled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Display"}
+    rate_multiplier: null
+    volume_multiplier: 2.2
+    hold_constant: [session_conversion_rate, view_to_cart_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {channel_group: "Display"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0035, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a funnel-behavior change. Display and Paid Search each keep their own session_conversion_rate flat; the aggregate dropped because cheap, low-intent Display traffic grew its session share (~doubled), diluting the blend. Decomposition is pure mix; warn against 'fixing the checkout' - no step in the funnel degraded."
+  expected_recommendation: "Acquisition/channel-mix action: trim or re-target the Display campaign that ballooned low-intent sessions and reallocate budget toward Paid Search, which converts higher. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session, net_revenue. NOT a funnel-step A/B test."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 55000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, rate delta driven by channel session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S013
+  title: "US->India share shift pulls down aggregate aov (per-country AOV unchanged)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1013
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-25"
+  eval_window: {start: "2020-12-25", end: "2021-01-14"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate aov fell ~10% over the eval window ($72 -> $65) while every country's own AOV is flat; India's transaction share rose sharply as its session share grew."
+  perturbation:
+    dimension: [country]
+    segment: {country: "India"}
+    rate_multiplier: null
+    volume_multiplier: 1.9
+    hold_constant: [aov, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {country: "India"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -7.0, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a pricing or basket-behavior change. Each country's aov is unchanged; the aggregate aov fell only because transaction share moved toward lower-AOV India (session/transaction share up ~1.9x). Pure mix decomposition; warn against discount/merchandising 'fixes' aimed at raising basket size - per-market behavior is stable."
+  expected_recommendation: "Acquisition/geo-mix action: this is a geography-mix shift, not a basket problem. Review the campaign or localization push that grew India's low-AOV share and rebalance paid spend toward higher-AOV markets (e.g. United States, Canada), or set market-specific ROAS targets. Primary: aov; guardrails: transactions, net_revenue. NOT a checkout or upsell experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 31000
+    basis: "(aov_t0 - aov_t1) * transactions_t1, where the aov delta is entirely composition-driven; summed over eval_window"
+    direction: loss
+
+- scenario_id: S014
+  title: "Adversarial: every device rate IMPROVES yet aggregate session_conversion_rate falls (mobile share surge)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1014
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~7% (2.5% -> 2.32%) over the eval window, yet desktop, mobile and tablet each posted slightly HIGHER own conversion rates; mobile's session share jumped from ~44% to ~57%."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: null
+    volume_multiplier: 1.7
+    hold_constant: [session_conversion_rate, view_to_cart_rate, cart_to_checkout_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0018, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Simpson's-paradox MIX-shift, NOT a funnel-behavior change. Adversarial: every single device's own session_conversion_rate is flat-to-improved, yet the blended aggregate falls purely because session share shifted toward lower-converting mobile (~44% -> ~57%). The aggregate decline is 100% composition; in-segment behavior actually improved. Strongly warn against 'fixing the checkout' - doing so would chase a phantom."
+  expected_recommendation: "Acquisition/traffic-quality action only. Because every device already converts as well or better, the lever is the traffic blend: investigate the source of the mobile session surge and rebalance paid spend toward desktop-weighted, higher-converting audiences or tighten mobile targeting quality. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. Explicitly NOT a checkout/funnel experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 26000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, with the rate delta arising solely from device session-share change despite per-segment rate gains; summed over eval_window"
+    direction: loss
+
+- scenario_id: S015
+  title: "Adversarial: Organic Search->Paid Social mix lowers aggregate revenue_per_session despite flat per-channel RPS"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1015
+  baseline_window: {start: "2020-11-15", end: "2020-12-04"}
+  inject_at: "2020-12-05"
+  eval_window: {start: "2020-12-05", end: "2020-12-24"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Aggregate revenue_per_session fell ~11% over the eval window ($1.95 -> $1.74); each channel's own revenue_per_session is flat or higher, but Paid Social's session share roughly tripled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Paid Social"}
+    rate_multiplier: null
+    volume_multiplier: 2.8
+    hold_constant: [revenue_per_session, session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.21, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Adversarial MIX-shift / composition change, NOT a monetization-behavior change. Per-channel revenue_per_session held flat or rose, yet the blended figure fell because low-RPS Paid Social tripled its session share, diluting the mix. Decomposition is pure mix (rate=0, interaction=0); warn against site-side conversion 'fixes' - every channel monetizes as before."
+  expected_recommendation: "Acquisition/channel-mix action: rebalance paid budget away from the bloated low-RPS Paid Social campaign toward higher-RPS Organic Search support / Paid Search, or fix Paid Social audience targeting. Primary: revenue_per_session; guardrails: sessions, net_revenue, session_conversion_rate. NOT a funnel-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 60000
+    basis: "(rps_t0 - rps_t1) * sessions_t1, with the RPS delta driven entirely by channel session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S016
+  title: "Windows->Android OS share shift lowers aggregate session_conversion_rate"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1016
+  baseline_window: {start: "2020-12-10", end: "2020-12-29"}
+  inject_at: "2020-12-30"
+  eval_window: {start: "2020-12-30", end: "2021-01-18"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~8% over the eval window (2.7% -> 2.48%); each operating_system's own conversion rate is flat while Android's session share rose markedly."
+  perturbation:
+    dimension: [operating_system]
+    segment: {operating_system: "Android"}
+    rate_multiplier: null
+    volume_multiplier: 1.75
+    hold_constant: [session_conversion_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {operating_system: "Android"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.0022, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a funnel-behavior change. Windows, Macintosh, iOS and Android each hold their own session_conversion_rate flat; the aggregate dipped only because session share moved toward lower-converting Android. Pure mix; warn against 'fixing the checkout' - no funnel step degraded for any OS."
+  expected_recommendation: "Acquisition/traffic-quality action: identify why Android session share grew (campaign device targeting or app-referral traffic) and rebalance spend toward higher-converting OS audiences, or tighten Android targeting. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. NOT an OS-specific checkout experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 37000
+    basis: "(blended_rate_t0 - blended_rate_t1) * sessions_t1 * aov, rate delta driven by OS session-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S017
+  title: "Apparel->Drinkware item-category mix lowers aggregate aov"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1017
+  baseline_window: {start: "2020-11-20", end: "2020-12-09"}
+  inject_at: "2020-12-10"
+  eval_window: {start: "2020-12-10", end: "2020-12-29"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate aov fell ~9% over the eval window ($68 -> $62) while every item_category's own AOV is unchanged; low-ticket Drinkware grew its transaction share as its session share rose."
+  perturbation:
+    dimension: [item_category]
+    segment: {item_category: "Drinkware"}
+    rate_multiplier: null
+    volume_multiplier: 1.8
+    hold_constant: [aov, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {item_category: "Drinkware"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -6.0, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "MIX-shift / composition change, NOT a pricing or basket-behavior change. Each item_category's aov is flat; the aggregate aov fell only because purchase share moved toward low-ticket Drinkware (session share up ~1.8x). Pure mix decomposition; warn against discounting or basket-size 'fixes' - per-category economics are stable."
+  expected_recommendation: "Acquisition/merchandising-mix action: this is a category-mix shift, not a basket problem. Review the promotion or landing-page push driving Drinkware-heavy traffic and rebalance acquisition toward higher-AOV categories (e.g. Apparel, Bags, Electronics) or add cross-sell of higher-ticket items. Primary: aov; guardrails: transactions, net_revenue. NOT a checkout experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 24000
+    basis: "(aov_t0 - aov_t1) * transactions_t1, with the aov delta entirely composition-driven; summed over eval_window"
+    direction: loss
+
+- scenario_id: S018
+  title: "Adversarial: Direct->Referral mix lowers aggregate checkout_to_purchase_rate despite flat per-channel rates"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1018
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~10% over the eval window (62% -> 56%) yet every channel's own checkout_to_purchase_rate is flat; low-completing Referral traffic grew its begin_checkout share substantially."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Referral"}
+    rate_multiplier: null
+    volume_multiplier: 2.4
+    hold_constant: [checkout_to_purchase_rate, cart_to_checkout_rate, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: -0.060, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Adversarial MIX-shift / composition change, NOT a checkout-behavior change. Every channel's own checkout_to_purchase_rate is unchanged; the aggregate fell because begin_checkout share shifted toward low-completing Referral traffic (~2.4x share growth). The aggregate rate metric moved purely by composition (rate=0, interaction=0). Strongly warn against 'fixing the checkout' - no channel's payment step degraded; the checkout is fine."
+  expected_recommendation: "Acquisition/traffic-quality action: the lever is the channel blend, not the payment step. Audit the Referral source that flooded begin_checkout with low-intent traffic and rebalance toward higher-completing channels (e.g. Direct, Email), or tighten referral-partner quality. Primary: checkout_to_purchase_rate; guardrails: begin_checkout_sessions, net_revenue, aov. Explicitly NOT a checkout-step A/B test."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 33000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, with the rate delta driven entirely by channel begin_checkout-share change; summed over eval_window"
+    direction: loss
+
+- scenario_id: S019
+  title: "Favorable: mobile->desktop share shift LIFTS aggregate session_conversion_rate (gain)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1019
+  baseline_window: {start: "2020-11-10", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-19"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate ROSE ~9% over the eval window (2.5% -> 2.72%) with no change in any device's own conversion rate; desktop's session share grew as higher-intent desktop traffic increased."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: 1.5
+    hold_constant: [session_conversion_rate, view_to_cart_rate, checkout_to_purchase_rate]
+  ground_truth:
+    root_cause_segment: {device_category: "desktop"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: 0.0022, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Favorable MIX-shift / composition change, NOT a funnel-behavior improvement. Each device's session_conversion_rate is unchanged; the aggregate rose purely because session share moved toward higher-converting desktop. Pure mix (rate=0, interaction=0). Do NOT attribute the lift to a checkout improvement - the funnel is unchanged; the gain is composition-driven and will reverse if the desktop share gain reverses."
+  expected_recommendation: "Acquisition/traffic-quality action: capitalize on the favorable mix by sustaining the desktop-weighted, higher-converting acquisition that drove the share gain (protect that campaign's budget) while monitoring durability. Primary: session_conversion_rate; guardrails: sessions, revenue_per_session. NOT a funnel-step experiment - there is no behavior change to scale."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Favorable composition-only shift: apparent aggregate-rate gain (~+0.0022 abs) is entirely mix-driven, no behavioral lift to bank; no actionable revenue at risk"
+    direction: none
+
+- scenario_id: S020
+  title: "Favorable: Display->Email channel mix LIFTS aggregate revenue_per_session (gain)"
+  bucket: single_segment_mix
+  anomaly_type: mix
+  seed: 1020
+  baseline_window: {start: "2021-01-02", end: "2021-01-16"}
+  inject_at: "2021-01-17"
+  eval_window: {start: "2021-01-17", end: "2021-01-31"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Aggregate revenue_per_session ROSE ~12% over the eval window ($1.70 -> $1.90) with every channel's own revenue_per_session unchanged; high-RPS Email grew its session share as a campaign scaled."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Email"}
+    rate_multiplier: null
+    volume_multiplier: 2.0
+    hold_constant: [revenue_per_session, session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {channel_group: "Email"}
+    dominant_effect: mix
+    mix_rate_interaction: {mix: 0.20, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Favorable MIX-shift / composition change, NOT a monetization-behavior improvement. Each channel's revenue_per_session is flat; the blended figure rose only because high-RPS Email doubled its session share. Pure mix (rate=0, interaction=0). Do NOT credit a site-side conversion improvement - the lift is composition-driven and tracks the Email share gain."
+  expected_recommendation: "Acquisition/channel-mix action: lean into the favorable mix by sustaining and scaling the high-RPS Email program that grew its share, while watching for diminishing returns; do not over-invest assuming a permanent behavioral lift. Primary: revenue_per_session; guardrails: sessions, net_revenue. NOT a funnel-step experiment."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Favorable composition-only shift: apparent RPS gain (~+0.20/session) is entirely mix-driven via Email share growth, no behavioral lift to bank; no actionable revenue at risk"
+    direction: none

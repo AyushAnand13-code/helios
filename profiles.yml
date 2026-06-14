@@ -1,0 +1,26 @@
+helios:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth                 # gcloud ADC; no key files on developer machines
+      project: helios-mvp           # your GCP project id
+      dataset: helios_dev           # personal/shared dev marts
+      location: US
+      threads: 8
+      priority: interactive
+      job_execution_timeout_seconds: 600
+      job_retries: 1
+      maximum_bytes_billed: 5368709120   # 5 GiB hard cap per query (the run byte budget)
+
+    prod:
+      type: bigquery
+      method: oauth                 # WIF-issued ADC token in CI; no JSON key
+      project: helios-mvp           # your GCP project id
+      dataset: helios_prod
+      location: US
+      threads: 16
+      priority: batch               # cheaper, non-interactive for scheduled refresh
+      job_execution_timeout_seconds: 1800
+      job_retries: 2
+      maximum_bytes_billed: 21474836480  # 20 GiB ceiling for the full prod refresh

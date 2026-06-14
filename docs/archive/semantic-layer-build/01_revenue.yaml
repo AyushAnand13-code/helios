@@ -1,0 +1,430 @@
+# =============================================================================
+# Helios Semantic Layer — REVENUE cluster (01)
+# =============================================================================
+# Path: models/semantic/_build/01_revenue.yaml
+# Standalone, valid YAML. Single top-level key `metrics:`. 2-space indentation.
+# Cross-cluster references (e.g. {users}, {sessions}, session_conversion_rate)
+# resolve at the final registry merge.
+#
+# CLUSTER INVARIANTS (must hold in every downstream consumer):
+#   - revenue (session-attributed, grain fct_funnel) and gross_revenue
+#     (order grain, fct_orders) RECONCILE AT THE GRAND TOTAL. They diverge per
+#     segment only by attribution timing/joins, never in the aggregate.
+#   - orders = COUNT(DISTINCT transaction_id) — dedup is mandatory; GA4 purchase
+#     events can repeat the same transaction_id across rows.
+#   - net_revenue = gross_revenue - refunds (refund_value_in_usd).
+#   - aov = gross_revenue / orders — MERCHANDISE value only; excludes shipping & tax.
+#   - revenue_per_user (ARPU) denominator is ALL users in the window, NOT purchasers.
+#   - revenue_per_session (RPS) = session_conversion_rate * aov (identity; see root_cause).
+# =============================================================================
+metrics:
+
+  # ---------------------------------------------------------------------------
+  # revenue — session-attributed purchase revenue (headline top-line)
+  # ---------------------------------------------------------------------------
+  - metric_name: revenue
+    label: "Revenue (session-attributed)"
+    category: revenue
+    type: sum
+    business_definition: "Total purchase revenue attributed to the session in which the purchase occurred, in USD. This is the headline top-line number. It is the sum of per-session purchase revenue (purchase_revenue_in_usd, deduped to one value per transaction) rolled up to whatever grouping is requested. Because it lives at session grain it can be sliced by any session dimension (channel, device, landing page) and feeds Revenue per Session (RPS) and Revenue per User (ARPU)."
+    sql_definition: "SUM(session_revenue)"
+    aggregation_method: sum
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Session-attributed: revenue is booked to the session that fired the purchase, not to a first-touch or last-non-direct marketing attribution model. Channel-level revenue here answers 'which channel was the purchasing session on', NOT 'which channel deserves credit for the conversion'."
+      - "Uses *_in_usd columns only; multi-currency orders are pre-converted by GA4. No FX re-conversion is performed."
+      - "session_revenue is the purchase_revenue_in_usd of the transaction, deduped to one value per transaction within the session, so summing across sessions does not double-count multi-event purchases."
+      - "EXCLUDES shipping and tax (it is merchandise/purchase revenue, mirroring gross_revenue's basis). It is NOT total amount charged to the customer."
+      - "GA4 sample dataset spans Nov 2020 – Jan 2021 only; absolute totals are demo-scale, not a real business."
+    common_mistakes:
+      - "Summing session_revenue at order or item grain — wrong grain inflates or deflates the total; revenue is defined ONLY at fct_funnel (session) grain."
+      - "Treating channel-sliced revenue as marketing-attributed credit (it is session-occurrence, not attribution)."
+      - "Comparing revenue (session grain) to gross_revenue (order grain) at a SEGMENT level and expecting exact equality — they only reconcile at the grand total."
+      - "Including shipping/tax expectations because the figure is called 'Revenue'."
+    guardrails:
+      do_not_use_when:
+        - "You need order-level financials (refunds, AOV, items) — use gross_revenue / net_revenue / aov at fct_orders grain instead."
+        - "You need marketing-attributed channel credit — this dataset has no attribution model and no cost data."
+      misinterpretations:
+        - "'Revenue' here is not GAAP/recognized revenue; it is GA4 purchase event revenue (merchandise value), pre-refund."
+        - "Not net of refunds — use net_revenue for post-refund figures."
+      simpsons_paradox_risk: "When revenue is decomposed into rate x value components (RPS = conversion x aov) per segment, weighted segment movements can reverse the aggregate direction; always decompose with mix-vs-rate (decompose_change), never compare raw segment ratios."
+      attribution_pitfalls: "Session-attributed only. Do NOT present channel_group revenue as 'channel ROI' or 'channel-driven revenue' — there is no last-non-direct/data-driven attribution and (critically) NO cost data, so ROI/ROAS is impossible from this layer."
+      segmentation_pitfalls: "Revenue is highly concentrated in a few sessions/transactions; small high-value segments (e.g. one large order) can dominate a slice. Inspect counts (orders) alongside revenue before drawing segment conclusions."
+    root_cause:
+      upstream_drivers: [orders, aov, purchasing_sessions, sessions]
+      downstream_impacts: [revenue_per_session, revenue_per_user, net_revenue]
+      related_dimensions: [channel_group, device_category, landing_page, country]
+      decomposition_path: "Revenue = sessions x session_conversion_rate x aov. Split by channel_group x device_category; run decompose_change to separate traffic (sessions), conversion-rate, and aov (basket) effects; drill the dominant term. For order-level basis cross-check, reconcile against gross_revenue at the grand total first."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "grand-total revenue reconciles to gross_revenue within 0.5% (cross-grain identity)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "session_revenue is NULL/0 for non-purchasing sessions and equals the deduped purchase_revenue_in_usd for purchasing sessions"
+        - "no negative session_revenue values (refunds are handled at order grain, not here)"
+      anomaly_checks: ["stl-residual on daily revenue series, weekly seasonality aware"]
+      reconciliation_checks:
+        - "SUM(revenue) over window == SUM(gross_revenue) over window within 0.5% (session-grain vs order-grain reconciliation)"
+        - "semantic revenue vs fct_daily_funnel additive recompute within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # orders — distinct transactions (deduped transaction_id)
+  # ---------------------------------------------------------------------------
+  - metric_name: orders
+    label: "Orders"
+    category: revenue
+    type: count
+    business_definition: "The number of distinct completed purchase transactions in the window, counted as distinct transaction_id. One order = one transaction_id, regardless of how many items it contains or how many GA4 purchase event rows reference it. Alias: 'transactions'. This is the denominator of AOV and the volume side of the top-line."
+    sql_definition: "COUNT(DISTINCT order_key)"
+    aggregation_method: count_distinct
+    grain: fct_orders
+    entity: order
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, country, channel_group, source, medium, campaign, is_new_user, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "order_key = transaction_id. Counting raw purchase event rows (not DISTINCT) double-counts because GA4 can emit the same transaction_id on multiple rows; the dedup is mandatory and baked into fct_orders (1 row / transaction_id)."
+      - "Some GA4 purchase events have null/empty transaction_id; those are excluded from fct_orders and therefore from this count (and from gross/net revenue and aov consistently)."
+      - "Order-grain dimensions are narrower than session dimensions (no landing_page/browser/region/operating_system at fct_orders), so do not request session-only dims on this metric."
+    common_mistakes:
+      - "COUNT(*) instead of COUNT(DISTINCT transaction_id) — inflates order count by repeated purchase rows."
+      - "Equating orders with purchasing_sessions: a session can in principle contain multiple transactions, and a transaction is order-grain; the two are close but not identical and live on different facts."
+      - "Equating orders with purchasers (distinct buying users) — one user can place multiple orders; see repeat_purchase_rate in the retention cluster."
+    guardrails:
+      do_not_use_when:
+        - "You need buyers, not orders — use purchasers (retention cluster) for distinct purchasing users."
+        - "You need session-grain slicing on session-only dimensions — orders lives at fct_orders."
+      misinterpretations:
+        - "'Orders' counts transactions, not line items or units — use units/items_per_transaction for basket size."
+        - "An order is not a user; repeat buyers inflate orders relative to purchasers."
+      simpsons_paradox_risk: "Low for a raw count, but order MIX across segments shifts AOV and revenue; when used as a denominator (aov), guard the ratio with SUM(num)/SUM(den) after grouping."
+      attribution_pitfalls: "Channel on an order is the session-scoped channel of the purchasing session, not an attributed credit; do not sum orders 'driven by' a channel as causal."
+      segmentation_pitfalls: "Sparse segments (rare campaign x country cells) yield tiny order counts where AOV/rates become unstable; enforce a minimum-count threshold before interpreting derived ratios."
+    root_cause:
+      upstream_drivers: [purchasing_sessions, sessions]
+      downstream_impacts: [aov, revenue, gross_revenue]
+      related_dimensions: [channel_group, device_category, country]
+      decomposition_path: "Split orders by channel_group x device_category; run decompose_change on order volume vs session volume to separate traffic growth from conversion-rate change; pair with aov to explain revenue movement."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0 and integer-valued"
+      - "orders <= purchasing_sessions is NOT guaranteed; reconcile counts to fct_orders rowcount within 0.5%"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "unique (transaction_id is the grain key of fct_orders)", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "COUNT(DISTINCT transaction_id) == fct_orders rowcount (grain integrity: 1 row per transaction)"
+        - "no null/empty transaction_id rows present in fct_orders"
+      anomaly_checks: ["stl-residual on daily order count, weekly seasonality aware"]
+      reconciliation_checks:
+        - "semantic orders vs fct_daily_funnel/fct_orders additive recompute within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # gross_revenue — order-grain merchandise revenue
+  # ---------------------------------------------------------------------------
+  - metric_name: gross_revenue
+    label: "Gross Revenue"
+    category: revenue
+    type: sum
+    business_definition: "Total merchandise purchase revenue at order grain, in USD: SUM of purchase_revenue_in_usd across distinct transactions. This is the order-grain twin of session-attributed 'revenue' and reconciles to it at the grand total. It is the numerator of AOV and the pre-refund basis for net_revenue. Excludes shipping and tax."
+    sql_definition: "SUM(gross_revenue)"
+    aggregation_method: sum
+    grain: fct_orders
+    entity: order
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, country, channel_group, source, medium, campaign, is_new_user, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "EXCLUDES shipping and tax. It is merchandise value (purchase_revenue_in_usd), not the total amount charged. If a stakeholder wants 'total cash collected', this is not it."
+      - "Pre-refund (gross). For post-refund use net_revenue."
+      - "Reconciles to session-grain revenue at the GRAND TOTAL only; per-segment splits can differ because attribution/joins differ across the two facts."
+      - "USD-only (*_in_usd); no FX re-conversion."
+    common_mistakes:
+      - "Confusing gross_revenue (excludes shipping/tax) with the customer's total bill."
+      - "Comparing gross_revenue to net_revenue and attributing the gap to costs — the gap is refunds only in this layer."
+      - "Slicing by session-only dimensions not present at order grain (landing_page, browser, region, operating_system)."
+    guardrails:
+      do_not_use_when:
+        - "You want session-attributed revenue with full session dimensionality — use the named metric revenue (fct_funnel)."
+        - "You want margin/profit — there is no COGS or cost data in this dataset."
+      misinterpretations:
+        - "'Gross' here means pre-refund merchandise revenue, NOT gross margin and NOT gross-of-discount."
+        - "Not the same number as session revenue at a segment level (only at grand total)."
+      simpsons_paradox_risk: "Gross revenue mix across product categories and channels shifts AOV; when reasoning about 'why revenue moved' decompose into orders x aov and guard aov with SUM/SUM after grouping."
+      attribution_pitfalls: "Channel on the order is session-scoped occurrence, not marketing attribution; no cost data means no ROAS."
+      segmentation_pitfalls: "A single large order can dominate a small segment's gross_revenue; always show order count beside it."
+    root_cause:
+      upstream_drivers: [orders, aov]
+      downstream_impacts: [net_revenue, aov, revenue]
+      related_dimensions: [channel_group, device_category, country]
+      decomposition_path: "gross_revenue = orders x aov. Split by channel_group x device_category; decompose_change into order-volume effect vs aov (basket) effect; reconcile to session-grain revenue at the grand total as a cross-fact integrity check."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "grand-total gross_revenue reconciles to session revenue within 0.5%"
+      - "gross_revenue >= net_revenue always (refunds are non-negative)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "gross_revenue per order equals purchase_revenue_in_usd of that transaction (no shipping/tax leakage)"
+        - "gross_revenue >= net_revenue at every grain"
+      anomaly_checks: ["stl-residual on daily gross_revenue series, weekly seasonality aware"]
+      reconciliation_checks:
+        - "SUM(gross_revenue) == SUM(revenue) over window within 0.5% (order-grain vs session-grain reconciliation)"
+        - "semantic gross_revenue vs fct_orders additive recompute within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # net_revenue — gross minus refunds
+  # ---------------------------------------------------------------------------
+  - metric_name: net_revenue
+    label: "Net Revenue"
+    category: revenue
+    type: sum
+    business_definition: "Merchandise revenue after refunds, at order grain, in USD: gross_revenue minus refund_value_in_usd. This is the closest available proxy to recognized revenue for the period. It still excludes shipping and tax and does NOT subtract costs (there is no COGS in this dataset)."
+    sql_definition: "SUM(net_revenue)"
+    aggregation_method: sum
+    grain: fct_orders
+    entity: order
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, country, channel_group, source, medium, campaign, is_new_user, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "net_revenue = gross_revenue - refund_value_in_usd. The ONLY deduction is refunds; it is NOT net of costs, fees, shipping, or tax."
+      - "GA4 refund events may post in a later period than the original order; net_revenue in a fixed window can therefore lag true post-refund value (refund timing skew)."
+      - "Refund data in the GA4 sample is sparse, so net_revenue is often nearly equal to gross_revenue — do not interpret a small gap as 'low returns' for a real business."
+      - "USD-only; pre-tax, pre-shipping."
+    common_mistakes:
+      - "Treating net_revenue as profit or margin — it has no cost component."
+      - "Comparing net to gross and calling the difference 'discounts' — it is refunds only."
+      - "Summing net_revenue across periods without accounting for refund timing (a refund may belong to a prior-period order)."
+    guardrails:
+      do_not_use_when:
+        - "You need profitability — no COGS/cost data exists in this dataset."
+        - "You need refund-timing-accurate accounting — refund events can straddle period boundaries."
+      misinterpretations:
+        - "'Net' = net of refunds, NOT net of cost/tax/shipping."
+        - "Not GAAP recognized revenue; it is a GA4-derived proxy."
+      simpsons_paradox_risk: "Refund rates vary by category/channel; a segment with high refunds can pull net below gross disproportionately. Decompose gross vs refunds separately rather than comparing net ratios across segments."
+      attribution_pitfalls: "Refunds are attributed to the order's session-scoped channel, not to any return-cause attribution."
+      segmentation_pitfalls: "Because refunds are sparse, net_revenue segment differences are dominated by gross_revenue; treat the refund component as low-signal in small segments."
+    root_cause:
+      upstream_drivers: [gross_revenue, orders]
+      downstream_impacts: [revenue]
+      related_dimensions: [channel_group, device_category, country]
+      decomposition_path: "net_revenue = gross_revenue - refunds. Decompose movement into gross_revenue change (orders x aov) and refund change; if net diverges from gross trend, drill the refund component by item_category/channel_group."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0 (no segment should have refunds exceeding gross)"
+      - "net_revenue <= gross_revenue always"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0", "dbt_utils.expression_is_true: net_revenue <= gross_revenue"]
+      quality_checks:
+        - "net_revenue == gross_revenue - refund_value_in_usd at every order row"
+        - "refund_value_in_usd >= 0 (no negative refunds)"
+      anomaly_checks: ["stl-residual on daily net_revenue series, weekly seasonality aware", "spike detection on daily refund component"]
+      reconciliation_checks:
+        - "SUM(net_revenue) == SUM(gross_revenue) - SUM(refund_value_in_usd) over window within 0.5%"
+        - "semantic net_revenue vs fct_orders additive recompute within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date (refund backfill may revise prior days)"
+
+  # ---------------------------------------------------------------------------
+  # aov — average order value (merchandise, ex-shipping/tax)
+  # ---------------------------------------------------------------------------
+  - metric_name: aov
+    label: "Average Order Value (AOV)"
+    category: revenue
+    type: ratio
+    business_definition: "The average merchandise value of an order: gross_revenue divided by orders, in USD. Computed as SUM(gross_revenue)/COUNT(DISTINCT transaction_id) AFTER grouping, never as an average of per-order ratios. Excludes shipping and tax. Answers 'how much is a typical basket worth' and is the value half of the RPS identity (RPS = session_conversion_rate x aov)."
+    sql_definition: "SAFE_DIVIDE(SUM(gross_revenue), COUNT(DISTINCT order_key))"
+    aggregation_method: ratio
+    grain: fct_orders
+    entity: order
+    numerator: gross_revenue
+    denominator: orders
+    expr: null
+    dimensions_supported: [device_category, country, channel_group, source, medium, campaign, is_new_user, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Merchandise AOV: EXCLUDES shipping and tax (numerator is gross_revenue = purchase_revenue_in_usd). It is not the average amount charged to the customer."
+      - "Computed as SUM(revenue)/SUM(orders) after grouping (ratio-of-sums), NOT the mean of per-order values, to defend against Simpson's paradox when slicing."
+      - "Pre-refund (uses gross_revenue, not net_revenue). A refund-adjusted AOV would use net_revenue and is intentionally not the default."
+      - "Highly sensitive to product-category MIX: a shift toward higher-priced categories raises AOV with no change in any single product's price."
+    common_mistakes:
+      - "Averaging per-order AOVs across segments (mean-of-ratios) instead of SUM(gross_revenue)/SUM(orders) — produces Simpson-paradox artifacts."
+      - "Including shipping/tax and then comparing to merchandise AOV from another tool."
+      - "Reading an AOV rise as 'customers spending more' when it is actually category mix shift (e.g. more apparel, fewer stickers)."
+      - "Computing AOV on tiny segments where one large order dominates the mean."
+    guardrails:
+      do_not_use_when:
+        - "Order count in the segment is very small — AOV is unstable; enforce a minimum order threshold."
+        - "You need per-customer spend — use revenue_per_user (ARPU); AOV is per-order, not per-buyer."
+      misinterpretations:
+        - "AOV up does NOT necessarily mean higher prices or healthier demand — it is often basket/category mix."
+        - "AOV is per ORDER, not per user or per session."
+      simpsons_paradox_risk: "HIGH. AOV is a ratio of sums and is dominated by product-category and channel mix. Aggregate AOV can rise while every category's AOV falls (mix toward expensive categories). ALWAYS decompose with mix-vs-rate (decompose_change) across item_category and channel_group before attributing an AOV move to behavior; never compare raw segment AOVs without mix weights."
+      attribution_pitfalls: "AOV by channel reflects the basket of the purchasing session's channel, not channel-attributed value; do not rank channels by AOV as 'channel quality' without volume context."
+      segmentation_pitfalls: "AOV variance explodes in sparse segments; a single high-value order skews small-segment AOV. Pair AOV with orders and a confidence/threshold guard. Cross-segment AOV comparisons require holding category mix constant."
+    root_cause:
+      upstream_drivers: [gross_revenue, orders]
+      downstream_impacts: [revenue, gross_revenue, revenue_per_session]
+      related_dimensions: [item_category, channel_group, device_category, country]
+      decomposition_path: "Decompose an AOV change by item_category x channel_group using decompose_change: separate within-category price/basket effect (rate) from category-mix effect (mix) and interaction. Drill the largest rate-effect category; confirm whether the aggregate move is mix-driven before any behavioral claim."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "aov == SAFE_DIVIDE(gross_revenue, orders) recomputed from components within 0.5%"
+      - "ratio computed as SUM(num)/SUM(den) after grouping (not mean of ratios)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "denominator (orders) > 0 wherever aov is reported; SAFE_DIVIDE yields NULL not error on zero orders"
+        - "numerator basis is gross_revenue (ex shipping/tax), not net_revenue"
+      anomaly_checks: ["stl-residual on daily aov series, weekly seasonality aware", "mix-shift alert: flag aov moves explained primarily by item_category mix"]
+      reconciliation_checks:
+        - "SUM(gross_revenue)/COUNT(DISTINCT transaction_id) == aov from fct_orders additive recompute within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # revenue_per_user — ARPU (denominator = ALL users)
+  # ---------------------------------------------------------------------------
+  - metric_name: revenue_per_user
+    label: "Revenue per User (ARPU)"
+    category: revenue
+    type: derived
+    business_definition: "Average revenue per user (ARPU): session-attributed revenue divided by the count of ALL distinct users in the window, in USD. The denominator is every user who had a session, NOT just purchasers — so ARPU blends conversion propensity and basket value across the whole audience. It answers 'how much revenue does an average user generate', the audience-monetization view."
+    sql_definition: "SAFE_DIVIDE(SUM(session_revenue), COUNT(DISTINCT user_pseudo_id))"
+    aggregation_method: derived
+    grain: fct_funnel
+    entity: user
+    numerator: null
+    denominator: null
+    expr: "SAFE_DIVIDE({revenue}, {users})"
+    dimensions_supported: [device_category, country, channel_group, source, medium, campaign, is_new_user, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Denominator is ALL users (every user_pseudo_id with a session), NOT purchasers. This is ARPU, not ARPPU (average revenue per PAYING user). Do not confuse the two."
+      - "user = user_pseudo_id is a COOKIE/DEVICE key, not a person. One human across browsers/devices = multiple users; cookie deletion creates new users. ARPU is per-cookie, biased downward by cookie churn (denominator inflated)."
+      - "Strongly window-dependent: over a 3-MONTH window (the GA4 sample is Nov 2020–Jan 2021) cumulative distinct users grow while revenue accrues, so ARPU is NOT comparable across windows of different length. Always state the window."
+      - "Numerator is session-attributed revenue (ex shipping/tax, pre-refund), summed at fct_funnel grain."
+    common_mistakes:
+      - "Using purchasers as the denominator (that is ARPPU/spend-per-buyer, a different metric)."
+      - "Comparing ARPU across windows of different length (cookie denominator accumulates with window size)."
+      - "Treating user_pseudo_id as a person and reading ARPU as per-customer LTV — it is per-cookie and not lifetime."
+      - "Slicing ARPU by session-only dims; user-grain dimensionality is narrower."
+    guardrails:
+      do_not_use_when:
+        - "You want spend per buyer — use a purchaser-denominated metric (ARPPU), not ARPU."
+        - "You are comparing periods of unequal length — the cookie denominator is not length-normalized."
+        - "You need person-level or lifetime value — cookie grain and a 3-month window preclude both."
+      misinterpretations:
+        - "ARPU is NOT customer lifetime value and NOT per-person; it is revenue per cookie over the chosen window."
+        - "A low ARPU can mean low conversion OR low basket OR an inflated (cookie-churned) user count, not necessarily weak monetization."
+      simpsons_paradox_risk: "ARPU = (purchasing_users/users) x spend-per-purchaser; user-mix across channels/devices (e.g. a channel bringing many low-intent new cookies) can move aggregate ARPU opposite to every segment. Decompose audience-mix vs per-user-value before interpreting."
+      attribution_pitfalls: "Channel ARPU credits the channel of the purchasing session and counts that channel's cookies in the denominator; new-cookie-heavy channels (paid, display) look low-ARPU by construction. No cost data, so this is not value-per-acquisition-dollar."
+      segmentation_pitfalls: "Cookie churn varies by browser/device (e.g. Safari ITP) and by new vs returning users, biasing the denominator unevenly across segments; ARPU segment comparisons are confounded by differential cookie persistence."
+    root_cause:
+      upstream_drivers: [revenue, users]
+      downstream_impacts: [revenue]
+      related_dimensions: [channel_group, device_category, is_new_user, country]
+      decomposition_path: "ARPU = user_conversion_rate x (revenue / purchasing_users). Split by channel_group x is_new_user; decompose into who-converts (audience/user-mix) vs how-much-buyers-spend; watch cookie-grain denominator inflation in new-cookie-heavy channels."
+    agents: [Monitor, Decompose, Diagnose, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "revenue_per_user == SAFE_DIVIDE(revenue, users) recomputed from named metrics within 0.5%"
+      - "denominator is users (ALL users), not purchasing_users"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "users denominator counts all distinct user_pseudo_id (not gated on reached_purchase)"
+        - "window length is recorded with every ARPU figure (length-sensitivity guard)"
+      anomaly_checks: ["stl-residual on daily ARPU series, weekly seasonality aware"]
+      reconciliation_checks:
+        - "revenue_per_user == SUM(revenue)/COUNT(DISTINCT user_pseudo_id) from fct_funnel within 0.5%"
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # revenue_per_session — RPS (identity: conversion x aov)
+  # ---------------------------------------------------------------------------
+  - metric_name: revenue_per_session
+    label: "Revenue per Session (RPS)"
+    category: revenue
+    type: derived
+    business_definition: "Average revenue generated per session: session-attributed revenue divided by sessions, in USD. RPS is the per-session monetization yield and is the cleanest single number for traffic-quality x value. It satisfies the identity RPS = session_conversion_rate x aov (yield = how often a session buys x how much an order is worth)."
+    sql_definition: "SAFE_DIVIDE(SUM(session_revenue), COUNT(DISTINCT session_key))"
+    aggregation_method: derived
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: "SAFE_DIVIDE({revenue}, {sessions})"
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "IDENTITY: RPS = session_conversion_rate x aov, but ONLY when both are computed as ratios-of-sums on the SAME population/grouping. session_conversion_rate is session-grain (purchasing_sessions/sessions) while aov is order-grain (gross_revenue/orders); the identity holds at the grand total and in clean splits, and is the canonical RPS decomposition. Small residuals can appear where session-grain revenue and order-grain gross_revenue diverge per segment — reconcile at grand total."
+      - "Numerator is session-attributed revenue (ex shipping/tax, pre-refund); denominator is distinct sessions (session_key)."
+      - "Less window-sensitive than ARPU (sessions do not accumulate per cookie the way distinct users do), but still report the window."
+    common_mistakes:
+      - "Confusing RPS (per session) with ARPU (per user) — sessions per user > 1, so RPS < ARPU is NOT a general rule; they have different denominators and meanings."
+      - "Decomposing RPS into conversion x aov while mixing per-order-ratio AOV (mean-of-ratios) — breaks the identity; use SUM/SUM aov."
+      - "Including shipping/tax in the numerator and breaking reconciliation with revenue."
+    guardrails:
+      do_not_use_when:
+        - "Session counts in the segment are tiny — RPS is unstable; enforce a minimum-session threshold."
+        - "You want per-buyer or per-user economics — use aov or revenue_per_user respectively."
+      misinterpretations:
+        - "RPS is per SESSION, not per visitor or per order."
+        - "A higher RPS channel is not automatically 'better ROI' — no cost data exists; RPS x sessions = revenue, but ROAS requires spend."
+      simpsons_paradox_risk: "RPS = session_conversion_rate x aov; a traffic-mix shift toward low-converting channels can drop aggregate RPS even if every segment's RPS rises. ALWAYS decompose mix (traffic share) vs rate (per-segment RPS) with decompose_change before interpreting an RPS move."
+      attribution_pitfalls: "RPS by channel uses the purchasing session's channel and that channel's session count as denominator; high-volume low-intent channels (display) look low-RPS by construction. Not attributed credit and not ROAS (no cost)."
+      segmentation_pitfalls: "Landing-page / campaign RPS is dominated by a few converting sessions in small cells; guard with session-count thresholds and confidence before ranking pages/campaigns by RPS."
+    root_cause:
+      upstream_drivers: [revenue, sessions, session_conversion_rate, aov]
+      downstream_impacts: [revenue]
+      related_dimensions: [channel_group, device_category, landing_page, country]
+      decomposition_path: "RPS = session_conversion_rate x aov. Split by channel_group x device_category; run decompose_change to separate the conversion-rate effect from the aov (basket) effect, and a second mix-vs-rate pass on traffic_share to isolate channel-mix vs within-channel-yield. Drill the largest contributor; reconcile revenue = RPS x sessions = gross_revenue at the grand total."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Narrator, Critic]
+    validation_checks:
+      - "value >= 0"
+      - "revenue_per_session == SAFE_DIVIDE(revenue, sessions) recomputed from named metrics within 0.5%"
+      - "RPS == session_conversion_rate * aov at the grand total within 0.5% (decomposition identity)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: min=0"]
+      quality_checks:
+        - "denominator (sessions) counts distinct session_key; SAFE_DIVIDE yields NULL not error on zero sessions"
+        - "identity check: RPS reconstructed as session_conversion_rate * aov within 0.5% at grand total"
+      anomaly_checks: ["stl-residual on daily RPS series, weekly seasonality aware"]
+      reconciliation_checks:
+        - "revenue_per_session == SUM(revenue)/COUNT(DISTINCT session_key) from fct_funnel within 0.5%"
+        - "RPS * sessions == revenue within 0.5% (yield x volume = top-line)"
+    freshness_requirements: "daily; available <=36h after event_date"

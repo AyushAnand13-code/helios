@@ -1,0 +1,299 @@
+- scenario_id: S001
+  title: "Paid Search x mobile checkout-to-purchase rate collapse"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1001
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell 11% week-over-week (6.1% -> 5.4%) over the eval window; overall purchasing_sessions down ~9%."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Paid Search", device_category: "mobile"}
+    rate_multiplier: 0.55
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Search", device_category: "mobile"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.013, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Paid Search x mobile checkout (purchasing_sessions/begin_checkout_sessions down 45% in that cell only); mix across device/channel is flat, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a simplified mobile payment step (one-tap wallet + autofill) for Paid Search mobile traffic. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 38000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S002
+  title: "Mobile view-to-cart rate drop after PDP redesign"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1002
+  baseline_window: {start: "2020-11-08", end: "2020-11-24"}
+  inject_at: "2020-11-25"
+  eval_window: {start: "2020-11-25", end: "2020-12-15"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate slid ~8% over the eval window (18.5% -> 17.0%); overall add_to_cart_sessions softened despite stable view_item_sessions."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "mobile"}
+    rate_multiplier: 0.70
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "mobile"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.015, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to mobile add-to-cart (add_to_cart_sessions/view_item_sessions down 30% on mobile only); desktop and tablet rates unchanged and device mix is flat, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a sticky mobile add-to-cart button with size/variant preselection on product detail pages for mobile traffic. Primary: view_to_cart_rate; guardrails: cart_to_checkout_rate, revenue_per_session, engagement_rate. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 52000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_conversion * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S003
+  title: "Display channel cart-to-checkout rate deterioration"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1003
+  baseline_window: {start: "2020-12-05", end: "2020-12-22"}
+  inject_at: "2020-12-23"
+  eval_window: {start: "2020-12-23", end: "2021-01-12"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate eased ~6% over the eval window (44.0% -> 41.5%); begin_checkout_sessions down modestly while add_to_cart_sessions held."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Display"}
+    rate_multiplier: 0.68
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Display"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.025, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Display traffic at the cart-to-checkout step (begin_checkout_sessions/add_to_cart_sessions down 32% for Display only); other channels' rates and the channel mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test an expedited guest-checkout entry (skip-account prompt) on the cart page for Display-sourced sessions. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 21000
+    basis: "(rate_t0 - rate_t1) * add_to_cart_sessions_t1 * downstream_conversion * aov, summed over eval_window"
+    direction: loss
+
+- scenario_id: S004
+  title: "Canada session conversion rate decline"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1004
+  baseline_window: {start: "2021-01-02", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate dipped ~5% over the eval window (2.10% -> 2.00%); purchasing_sessions softened with sessions flat."
+  perturbation:
+    dimension: [country]
+    segment: {country: "Canada"}
+    rate_multiplier: 0.60
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "Canada"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0010, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to Canada sessions (purchasing_sessions/sessions down 40% for Canada only); other countries' conversion rates and the country mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test localized CAD pricing display and duties-included messaging at checkout for Canada sessions. Primary: session_conversion_rate; guardrails: checkout_to_purchase_rate, aov, revenue_per_session. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 14000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over eval_window for Canada"
+    direction: loss
+
+- scenario_id: S005
+  title: "Safari cart abandonment rate spike"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1005
+  baseline_window: {start: "2020-11-10", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-17"}
+  target_metric: cart_abandonment_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_abandonment_rate rose ~4% over the eval window (78.0% -> 81.0%); purchasing_sessions fell relative to add_to_cart_sessions."
+  perturbation:
+    dimension: [browser]
+    segment: {browser: "Safari"}
+    rate_multiplier: 0.65
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {browser: "Safari"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Safari, where the purchase-from-cart rate fell 35% (abandonment up) for Safari only; other browsers' abandonment and the browser mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05). Note: timing overlaps Black Friday, but the lift is browser-specific not store-wide, ruling out seasonality."
+  expected_recommendation: "A/B test a Safari-targeted checkout fix (Apple Pay button + saved-card autofill, third-party-cookie-independent session handling). Primary: cart_abandonment_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 31000
+    basis: "(rate_t1 - rate_t0)_abandonment * add_to_cart_sessions_t1 * aov, summed over eval_window for Safari"
+    direction: loss
+
+- scenario_id: S006
+  title: "Sale landing page checkout-to-purchase rate drop"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1006
+  baseline_window: {start: "2020-12-26", end: "2021-01-10"}
+  inject_at: "2021-01-11"
+  eval_window: {start: "2021-01-11", end: "2021-01-31"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate eased ~5% over the eval window (60.0% -> 57.0%); purchasing_sessions down with begin_checkout_sessions stable."
+  perturbation:
+    dimension: [landing_page]
+    segment: {landing_page: "/google+redesign/sale"}
+    rate_multiplier: 0.72
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {landing_page: "/google+redesign/sale"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to sessions landing on /google+redesign/sale (purchasing_sessions/begin_checkout_sessions down 28% for that landing page only); other landing pages' rates and the landing-page mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test clearer sale-eligibility and promo-code application at the payment step for /google+redesign/sale landers. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 18000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over eval_window for /google+redesign/sale"
+    direction: loss
+
+- scenario_id: S007
+  title: "New-user view-to-cart rate erosion"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1007
+  baseline_window: {start: "2020-12-01", end: "2020-12-18"}
+  inject_at: "2020-12-19"
+  eval_window: {start: "2020-12-19", end: "2021-01-08"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate softened ~7% over the eval window (16.0% -> 14.9%); add_to_cart_sessions down while view_item_sessions held."
+  perturbation:
+    dimension: [is_new_user]
+    segment: {is_new_user: true}
+    rate_multiplier: 0.75
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {is_new_user: true}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.011, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change confined to new users at the add-to-cart step (add_to_cart_sessions/view_item_sessions down 25% for is_new_user=true only); returning-user rate and the new-vs-returning mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a first-visit incentive and clearer add-to-cart affordance on product pages for new users. Primary: view_to_cart_rate; guardrails: cart_to_checkout_rate, engagement_rate, revenue_per_user. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 27000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_conversion * aov, summed over eval_window for new users"
+    direction: loss
+
+- scenario_id: S008
+  title: "Organic Search x desktop session conversion rate decline"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1008
+  baseline_window: {start: "2020-11-15", end: "2020-12-02"}
+  inject_at: "2020-12-03"
+  eval_window: {start: "2020-12-03", end: "2020-12-23"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate dipped ~6% over the eval window (2.40% -> 2.25%); purchasing_sessions down with sessions stable."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Organic Search", device_category: "desktop"}
+    rate_multiplier: 0.62
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Organic Search", device_category: "desktop"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0015, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change isolated to Organic Search x desktop sessions (purchasing_sessions/sessions down 38% in that cell only); all other channel/device cells and the overall mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "A/B test a streamlined desktop checkout (persistent cart + express-pay) for Organic Search desktop landers. Primary: session_conversion_rate; guardrails: checkout_to_purchase_rate, aov, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 44000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over eval_window for Organic Search x desktop"
+    direction: loss
+
+- scenario_id: S009
+  title: "Tablet cart-to-checkout rate improvement"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1009
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate rose ~4% over the eval window (43.0% -> 44.8%); begin_checkout_sessions up with add_to_cart_sessions stable."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "tablet"}
+    rate_multiplier: 1.35
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "tablet"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.018, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate improvement confined to tablet at the cart-to-checkout step (begin_checkout_sessions/add_to_cart_sessions up 35% on tablet only); desktop and mobile rates and the device mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Roll out the tablet cart-page layout that drove the lift and A/B test porting it to mobile. Primary: cart_to_checkout_rate; guardrails: checkout_to_purchase_rate, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 12000
+    basis: "(rate_t1 - rate_t0) * add_to_cart_sessions_t1 * downstream_conversion * aov, summed over eval_window for tablet"
+    direction: gain
+
+- scenario_id: S010
+  title: "United Kingdom checkout-to-purchase rate improvement"
+  bucket: single_segment_rate
+  anomaly_type: rate
+  seed: 1010
+  baseline_window: {start: "2020-12-10", end: "2020-12-27"}
+  inject_at: "2020-12-28"
+  eval_window: {start: "2020-12-28", end: "2021-01-17"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate rose ~5% over the eval window (58.0% -> 60.9%); purchasing_sessions up with begin_checkout_sessions stable."
+  perturbation:
+    dimension: [country]
+    segment: {country: "United Kingdom"}
+    rate_multiplier: 1.30
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "United Kingdom"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.029, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate improvement confined to United Kingdom sessions at the checkout-to-purchase step (purchasing_sessions/begin_checkout_sessions up 30% for the UK only); other countries' rates and the country mix are unchanged, so this is in-segment behavior, not composition. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Confirm the UK payment-step change (local card schemes + GBP express-pay) via holdback A/B test before global rollout. Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 16000
+    basis: "(rate_t1 - rate_t0) * begin_checkout_sessions_t1 * aov, summed over eval_window for United Kingdom"
+    direction: gain

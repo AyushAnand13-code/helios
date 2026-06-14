@@ -1,0 +1,185 @@
+- scenario_id: S045
+  title: "transaction_id duplication inflating revenue and aov on desktop"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1045
+  baseline_window: {start: "2020-11-15", end: "2020-12-05"}
+  inject_at: "2020-12-06"
+  eval_window: {start: "2020-12-06", end: "2020-12-26"}
+  target_metric: aov
+  funnel_step: {numerator: revenue, denominator: transactions}
+  anomaly: "Aggregate revenue jumped ~28% and aov rose ~22% ($61 -> $74) week-over-week on desktop, with no corresponding rise in purchasing_sessions; transactions appear inflated."
+  perturbation:
+    dimension: [device_category]
+    segment: {device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "transaction_id duplication: a subset of desktop orders ingested twice (duplicate transaction_id rows), double-counting transactions and revenue while purchasing_sessions stays flat"
+    hold_constant: [sessions, purchasing_sessions]
+  ground_truth:
+    root_cause_segment: {device_category: "desktop"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "transaction_id duplication data-quality issue, not a behavior change; the revenue/aov move is spurious. Duplicate transaction_id rows on desktop double-count transactions and revenue (~28% apparent revenue lift, aov $61 -> $74) while purchasing_sessions is unchanged, so per-session economics did not actually improve. Critic refutes: dedup transaction_id and the swing disappears."
+  expected_recommendation: "Fix the data pipeline: deduplicate on transaction_id (keep first ingest), exclude the affected desktop partition, and re-run the diagnosis. Do NOT launch an experiment off the inflated aov."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; apparent +28% revenue / +22% aov is a duplication artifact, not real demand"
+    direction: none
+
+- scenario_id: S046
+  title: "NULL spike: source collapses to (not set) for a traffic chunk"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1046
+  baseline_window: {start: "2020-12-01", end: "2020-12-18"}
+  inject_at: "2020-12-19"
+  eval_window: {start: "2020-12-19", end: "2021-01-08"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "A large block of sessions shows source = '(not set)' starting 2020-12-19, making attributed channels appear to lose ~18% of their sessions overnight while '(not set)' balloons."
+  perturbation:
+    dimension: [source]
+    segment: {source: "(not set)"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "NULL spike: a tracking/attribution gap stamps source as '(not set)' for a chunk of otherwise-valid traffic, so sessions are mis-bucketed rather than lost"
+    hold_constant: [sessions, users, session_conversion_rate]
+  ground_truth:
+    root_cause_segment: {source: "(not set)"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "NULL-spike data-quality issue, not a behavior change; the apparent ~18% session loss in attributed channels is spurious. Sessions were re-labeled source = '(not set)' by an attribution gap, not actually lost (total sessions and session_conversion_rate are flat). Critic refutes: the missing channel sessions exactly reappear in the '(not set)' bucket."
+  expected_recommendation: "Fix the data pipeline: repair source attribution / backfill the '(not set)' partition, exclude it from channel-level diagnosis, and re-run. Do NOT launch an experiment on a channel that did not actually decline."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~18% apparent channel-session drop is a NULL-attribution artifact, total sessions unchanged"
+    direction: none
+
+- scenario_id: S047
+  title: "Late-arriving shard: one-day dip across ALL metrics"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1047
+  baseline_window: {start: "2020-12-20", end: "2021-01-02"}
+  inject_at: "2021-01-03"
+  eval_window: {start: "2021-01-03", end: "2021-01-20"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "On 2021-01-03 every metric (sessions, users, transactions, revenue) drops ~40% for a single day then fully recovers the next day, producing an apparent one-day store-wide collapse."
+  perturbation:
+    dimension: [day]
+    segment: {day: "2021-01-03"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "late-arriving / partially-missing event_date shard: one day's export landed only partially at query time, so all metrics for that single day are under-counted across every dimension uniformly"
+    hold_constant: [session_conversion_rate, aov]
+  ground_truth:
+    root_cause_segment: {day: "2021-01-03"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Late-arriving shard data-quality issue, not a behavior change; the one-day ~40% drop across all metrics is spurious. A single event_date partition is partially loaded, so volumes are uniformly under-counted on 2021-01-03 while ratio metrics (session_conversion_rate, aov) are unchanged and neighboring days are normal. Critic refutes: dip is confined to one partition and is not segment-specific."
+  expected_recommendation: "Fix the data pipeline: wait for / backfill the 2021-01-03 shard, exclude that partition from the eval window, and re-run. Do NOT launch an experiment off a single under-loaded day."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~40% one-day drop is a missing-partition artifact that backfills, not lost revenue"
+    direction: none
+
+- scenario_id: S048
+  title: "Bot/spam traffic spike inflating sessions, diluting conversion"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1048
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Sessions surged ~35% on Referral / desktop while purchasing_sessions held flat, so session_conversion_rate appears to fall ~26% (2.7% -> 2.0%); looks like an unfavorable mix-shift toward low-converting traffic."
+  perturbation:
+    dimension: [channel_group, device_category]
+    segment: {channel_group: "Referral", device_category: "desktop"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "bot/spam traffic spike: non-human sessions inflate sessions/users on Referral desktop with zero downstream funnel events, diluting session_conversion_rate; junk volume, not a real audience-mix change"
+    hold_constant: [purchasing_sessions, transactions, revenue]
+  ground_truth:
+    root_cause_segment: {channel_group: "Referral", device_category: "desktop"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Bot/spam traffic data-quality issue, not a behavior change; the ~26% session_conversion_rate dilution is spurious. The Referral-desktop session surge has no add_to_cart/begin_checkout/purchasing activity, so it is junk traffic inflating the denominator, not a genuine low-converting mix-shift. Critic refutes: purchasing_sessions, transactions and revenue are unchanged."
+  expected_recommendation: "Fix the data pipeline: apply bot filtering / exclude the Referral-desktop spam sessions and re-run. Do NOT launch an experiment to 'recover' a conversion rate that only dropped because of junk traffic."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~26% apparent conversion dilution is bot-inflated sessions in the denominator, real purchases unchanged"
+    direction: none
+
+- scenario_id: S049
+  title: "Tracking regression: add_to_cart stops firing on Safari"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1049
+  baseline_window: {start: "2020-12-10", end: "2020-12-28"}
+  inject_at: "2020-12-29"
+  eval_window: {start: "2020-12-29", end: "2021-01-18"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "On Safari, view_to_cart_rate appears to collapse ~60% (14% -> 5.5%) starting 2020-12-29 while view_item_sessions, begin_checkout_sessions, purchasing_sessions and revenue on Safari are unchanged."
+  perturbation:
+    dimension: [browser]
+    segment: {browser: "Safari"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "tracking regression: the add_to_cart event stops firing on Safari (instrumentation bug), so add_to_cart_sessions is under-reported and view_to_cart_rate looks like it collapsed even though downstream checkout/purchase volumes are intact"
+    hold_constant: [view_item_sessions, begin_checkout_sessions, purchasing_sessions, revenue]
+  ground_truth:
+    root_cause_segment: {browser: "Safari"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "Tracking-regression data-quality issue, not a behavior change; the ~60% Safari view_to_cart_rate collapse is spurious. add_to_cart stopped firing on Safari, so the numerator is under-counted, yet begin_checkout_sessions and purchasing_sessions on Safari are unchanged - impossible if users had truly stopped adding to cart. Critic refutes: the funnel is internally inconsistent (downstream > implied upstream)."
+  expected_recommendation: "Fix the data pipeline / instrumentation: restore the Safari add_to_cart event and backfill, or exclude Safari from view_to_cart_rate diagnosis, then re-run. Do NOT launch an experiment on a cart step that did not actually regress."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~60% apparent view_to_cart_rate drop is a missing add_to_cart event, downstream purchases and revenue intact"
+    direction: none
+
+- scenario_id: S050
+  title: "_in_usd revenue null understating revenue for India"
+  bucket: data_quality
+  anomaly_type: none
+  seed: 1050
+  baseline_window: {start: "2020-11-10", end: "2020-11-28"}
+  inject_at: "2020-11-29"
+  eval_window: {start: "2020-11-29", end: "2020-12-19"}
+  target_metric: revenue_per_session
+  funnel_step: {numerator: revenue, denominator: sessions}
+  anomaly: "Revenue and revenue_per_session for India appear to fall ~70% (revenue_per_session $0.40 -> $0.12) starting 2020-11-29 while transactions, purchasing_sessions and items_per_transaction for India are unchanged."
+  perturbation:
+    dimension: [country]
+    segment: {country: "India"}
+    rate_multiplier: null
+    volume_multiplier: null
+    artifact: "_in_usd revenue null/zero: the USD currency-converted revenue field is null/zero for India orders, so revenue (and revenue_per_session/aov) is understated even though transaction counts and purchase volume are correct"
+    hold_constant: [transactions, purchasing_sessions, sessions, items_per_transaction]
+  ground_truth:
+    root_cause_segment: {country: "India"}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: true
+  expected_diagnosis: "_in_usd revenue-null data-quality issue, not a behavior change; the ~70% India revenue / revenue_per_session drop is spurious. The USD-converted revenue field is null/zero for India orders so monetary metrics are understated, yet transactions, purchasing_sessions and items_per_transaction are unchanged - revenue cannot fall while purchase counts hold. Critic refutes: the monetary-vs-volume metrics are inconsistent."
+  expected_recommendation: "Fix the data pipeline: repair/backfill the _in_usd currency conversion for India and re-run, or exclude India revenue metrics until corrected. Do NOT launch an experiment off understated revenue."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "no actionable loss; the ~70% apparent India revenue drop is a null _in_usd conversion artifact, real transactions unchanged"
+    direction: none

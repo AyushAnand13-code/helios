@@ -1,0 +1,361 @@
+# =============================================================================
+# Helios Semantic Layer - Cluster 02: TRAFFIC
+# =============================================================================
+# Path: models/semantic/_build/02_traffic.yaml
+# Authoritative source for audience-volume and engagement metrics. Every Helios
+# agent (Monitor, Decompose, Diagnose, Prescribe, Narrator, Critic) consumes ONLY
+# this layer; semantic-mcp.build_query composes governed SQL strictly from it.
+#
+# CLUSTER SCOPE: users, new_users, returning_users, sessions, engaged_sessions,
+#                engagement_rate.
+#
+# KEY HONESTY NOTES (carried into per-metric caveats/guardrails):
+#   - users/new_users/returning_users are COOKIE-grain. user_pseudo_id is a
+#     device+browser cookie key, NOT a person. GA4 export here has user_id = NULL,
+#     so cross-device stitching is impossible and cookie churn (clearing cookies,
+#     ITP/ETP 7-day cap, incognito) inflates user counts and the "new" share.
+#   - new_users keys off ga_session_number = 1 (surfaced as is_new_user). A cookie
+#     reset re-mints a "new" user, so new_users overstates true first-time humans.
+#   - engaged_session = session_engaged='1' OR engagement_time_msec >= 10000 (the
+#     GA4 engaged-session definition); engagement is NOT conversion.
+#   - sessions is the mix weight w_i for decompose_change: it is the denominator of
+#     nearly every rate metric, so any sessions movement reweights the funnel and
+#     conversion aggregates. Recorded in each metric's downstream_impacts.
+# =============================================================================
+
+metrics:
+
+  # ---------------------------------------------------------------------------
+  # users  (cookie-grain audience size)
+  # ---------------------------------------------------------------------------
+  - metric_name: users
+    label: "Users"
+    category: traffic
+    type: count
+    business_definition: "Distinct visitors in the window, counted by GA4 cookie (user_pseudo_id). One value per device+browser, not per human - a single person on phone + laptop counts as two users."
+    sql_definition: "COUNT(DISTINCT user_pseudo_id)"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: user
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "COOKIE-grain, not person-grain: user_pseudo_id is a device+browser cookie identifier. user_id is NULL in this GA4 export, so cross-device identity stitching is impossible."
+      - "Cookie churn inflates the count: clearing cookies, Safari ITP / Firefox ETP 7-day client-cookie caps, incognito sessions, and new devices each mint a fresh user_pseudo_id for the same human."
+      - "Not additive across time: distinct users for a month is NOT the sum of daily distinct users (the same cookie recurs on multiple days). Always recompute COUNT(DISTINCT ...) at the requested grain; never SUM a daily users series."
+      - "A user can span multiple channel_group / device_category values across sessions; slicing by a session dimension distributes (and may double-count) the user across slices, so segment user totals can exceed the ungrouped total."
+    common_mistakes:
+      - "Treating users as unique people or reading it as reach for ad frequency - it is device-cookie reach only."
+      - "Summing a per-day users time series to get period users (over-counts recurring cookies)."
+      - "Computing returning users as (users this period - new users this period) at a rolled-up grain - returning_users is defined independently as the distinct non-first-session cookies, not by subtraction."
+    guardrails:
+      do_not_use_when:
+        - "A person-level or cross-device de-duplicated audience is required (e.g. unique-reach, CRM matching) - this dataset cannot support it."
+        - "Comparing windows that straddle a tracking/consent change (e.g. ITP rollout, consent-banner launch) where cookie lifetime shifted."
+      misinterpretations:
+        - "Equating users with 'customers' or 'accounts' - most users never purchase, and purchasers are a separate metric (purchasing_users in the conversion cluster)."
+        - "Assuming users + 1 device = 1 row - the same human on two devices is two users."
+      simpsons_paradox_risk: "Per-segment user counts do not sum to the total because a cookie can appear in multiple segments (e.g. mobile + desktop); never reconstruct totals by summing distinct-count slices."
+      attribution_pitfalls: "channel_group / source / medium are session-scoped, so the same user attributed to different channels across sessions is counted once ungrouped but once per channel when sliced by channel_group."
+      segmentation_pitfalls: "Because distinct counts are non-additive, the sum of users over slices >= the ungrouped total; report the ungrouped distinct count for the headline and never derive it by addition."
+    root_cause:
+      upstream_drivers: [new_users, returning_users, sessions]
+      downstream_impacts: [revenue_per_user, user_conversion_rate, sessions]
+      related_dimensions: [channel_group, device_category, country]
+      decomposition_path: "Split by channel_group x device_category; compare new_users vs returning_users mix; run decompose_change to separate audience-size growth from per-channel acquisition shifts; drill the largest channel contributor."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 and integer"
+      - "users >= sessions is FALSE in general; expect users <= sessions (a user has >= 1 session)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0}"]
+      quality_checks:
+        - "users <= sessions at every grain (each user has at least one session)"
+        - "users approximately equals new_users + returning_users at the ungrouped grain (a user is new XOR returning within the window only up to first-session boundary; tolerate small overlap from mid-window first sessions)"
+      anomaly_checks: ["stl-residual on daily distinct-users series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic distinct-users vs fct_daily_funnel HLL/exact recompute within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # new_users  (first-session cookies)
+  # ---------------------------------------------------------------------------
+  - metric_name: new_users
+    label: "New Users"
+    category: traffic
+    type: count
+    business_definition: "Distinct visitors whose session in the window is their first ever (ga_session_number = 1, surfaced as is_new_user). The acquisition-side audience: cookies appearing for the first time."
+    sql_definition: "COUNT(DISTINCT IF(is_new_user, user_pseudo_id, NULL))"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: user
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "'New' is defined by ga_session_number = 1 on a COOKIE, not by a genuinely first-time human. A user who clears cookies or switches device is re-minted as new, so new_users systematically overstates true first-time visitors."
+      - "Cookie churn (ITP/ETP 7-day cap, incognito, consent reset) is the dominant inflator: returning humans reappear as new users."
+      - "ga_session_number resets are device-local; the same person new on mobile is also new on desktop."
+      - "Slicing new_users by is_new_user is redundant (it is always TRUE within this metric) and slicing by session_number_bucket will only ever populate the '1' bucket."
+    common_mistakes:
+      - "Reading new_users as 'new customers' - these are new visitors; almost all never purchase (new customers = new_purchasers in the acquisition cluster)."
+      - "Comparing new_users across periods that span a cookie-lifetime / consent change without flagging that 'new' was re-minted."
+      - "Using new_users as the denominator for a true CAC - there is no cost data; see cac_proxy honesty note in the acquisition cluster."
+    guardrails:
+      do_not_use_when:
+        - "A genuine first-time-human acquisition count is required - cookie churn makes this an upper bound only."
+        - "Windows straddle a tracking change that altered cookie persistence (artificially spikes new_users)."
+      misinterpretations:
+        - "Equating a rise in new_users with brand growth when it may be cookie-deletion churn re-minting returning visitors."
+        - "Assuming new_users + returning_users double-counts - a cookie's first session is new and its later sessions are returning, so a single cookie can be in BOTH metrics across the window (see segmentation_pitfalls)."
+      simpsons_paradox_risk: "A channel can grow its new-user share while total new_users falls; always decompose mix (channel weight) vs rate (new-share within channel)."
+      attribution_pitfalls: "First-session source/medium is the acquisition channel; later returning sessions may differ. Slicing new_users by channel_group reflects first-touch acquisition channel, which differs from the channel of later revenue."
+      segmentation_pitfalls: "new_users and returning_users are NOT a clean partition of users within a window: a cookie whose first session falls inside the window contributes to new_users, and its subsequent sessions contribute to returning_users, so the same cookie can appear in both."
+    root_cause:
+      upstream_drivers: [sessions]
+      downstream_impacts: [users, revenue_per_user, user_conversion_rate]
+      related_dimensions: [channel_group, source, campaign]
+      decomposition_path: "Split by channel_group x campaign (first-touch); run decompose_change to separate acquisition-volume shifts from channel-mix shifts; cross-check against a cookie-lifetime change before attributing to marketing."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 and integer"
+      - "new_users <= users at every grain"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0}"]
+      quality_checks:
+        - "new_users <= users at every grain"
+        - "every row contributing to new_users has is_new_user = TRUE and ga_session_number = 1"
+      anomaly_checks: ["stl-residual on daily new-users series, weekly seasonality aware; flag step-changes coinciding with tracking releases"]
+      reconciliation_checks: ["semantic new_users vs fct_daily_funnel recompute within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # returning_users  (non-first-session cookies)
+  # ---------------------------------------------------------------------------
+  - metric_name: returning_users
+    label: "Returning Users"
+    category: traffic
+    type: count
+    business_definition: "Distinct visitors with at least one non-first session in the window (ga_session_number > 1, i.e. NOT is_new_user). Visitors whose GA4 cookie was already known to the property."
+    sql_definition: "COUNT(DISTINCT IF(NOT is_new_user, user_pseudo_id, NULL))"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: user
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "COOKIE-grain: 'returning' means the user_pseudo_id cookie had a prior session, not that the human is loyal. Cookie churn UNDER-counts returning users - a returning human whose cookie was cleared shows up as new instead."
+      - "Defined directly as distinct non-first-session cookies, NOT as (users - new_users). At rolled-up grains those differ because a single cookie can have both a first and a later session inside the window."
+      - "Bounded by the GA4 export horizon (Nov 2020-Jan 2021): a session can only be 'returning' if GA4 recorded a prior session for the cookie, which is itself subject to cookie persistence."
+    common_mistakes:
+      - "Computing returning_users = users - new_users at any grouped grain - this double-subtracts cookies that are both new and returning within the window."
+      - "Interpreting returning_users as repeat purchasers - returning means repeat VISITS, not repeat ORDERS (see repeat_purchase_rate in the retention cluster)."
+    guardrails:
+      do_not_use_when:
+        - "Loyalty / retention must be measured at person grain - cookie churn biases this downward and retention belongs to the cohort metrics."
+        - "Deriving it by subtraction from users at a sliced grain."
+      misinterpretations:
+        - "Equating returning visitors with returning customers (a purchase concept) - most returning users do not buy."
+        - "Assuming new_users + returning_users == users exactly; within-window first+later sessions of one cookie break the identity."
+      simpsons_paradox_risk: "Returning-user share can rise overall while falling in every channel if traffic mix shifts toward high-return channels; decompose mix vs rate."
+      attribution_pitfalls: "A returning user's session channel may differ from their acquisition channel; slicing by channel_group reflects the channel of the returning visit, not original acquisition."
+      segmentation_pitfalls: "Non-additive distinct counts: summing returning_users over slices exceeds the ungrouped total when a cookie returns via multiple channels/devices."
+    root_cause:
+      upstream_drivers: [sessions]
+      downstream_impacts: [users, revenue_per_user, user_conversion_rate]
+      related_dimensions: [channel_group, device_category, country]
+      decomposition_path: "Split by channel_group x device_category; compare returning-share trend; run decompose_change to isolate whether returning growth is mix (more high-return channels) or rate (better retention within channel)."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 and integer"
+      - "returning_users <= users at every grain"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0}"]
+      quality_checks:
+        - "returning_users <= users at every grain"
+        - "every contributing row has is_new_user = FALSE (ga_session_number > 1)"
+      anomaly_checks: ["stl-residual on daily returning-users series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic returning_users vs fct_daily_funnel recompute within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # sessions  (the mix weight w_i for decomposition)
+  # ---------------------------------------------------------------------------
+  - metric_name: sessions
+    label: "Sessions"
+    category: traffic
+    type: count
+    business_definition: "Distinct visits in the window. A session is one (user_pseudo_id, ga_session_id) pair, deduped via session_key. The base volume on which the entire funnel and every rate metric is built."
+    sql_definition: "COUNT(DISTINCT session_key)"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "session_key = TO_HEX(MD5(CONCAT(user_pseudo_id,'-',CAST(ga_session_id AS STRING)))). A GA4 session times out after 30 min of inactivity and at UTC midnight, so a single visit crossing midnight splits into two sessions."
+      - "sessions is the MIX WEIGHT w_i for decompose_change: it is the denominator of session_conversion_rate, the funnel step rates, engagement_rate, and revenue_per_session. Any movement in sessions reweights every downstream rate even when per-session behaviour is unchanged - this is the central Simpson's-paradox lever."
+      - "Distinct count is non-additive across time and segments; recompute COUNT(DISTINCT session_key) at the requested grain rather than summing slices."
+      - "Cookie-derived: bot/spam traffic and cookie churn add spurious sessions that dilute rate denominators (see engagement_rate guardrails)."
+    common_mistakes:
+      - "Summing daily distinct sessions to get a period total - session_key is unique per day-event but COUNT(DISTINCT) must be recomputed at the period grain."
+      - "Comparing a rate across segments without holding the sessions mix constant - shifts in the sessions weight w_i drive apparent rate changes (mix effect)."
+    guardrails:
+      do_not_use_when:
+        - "A person-level or visit-quality measure is needed - sessions counts visits including bot/low-quality traffic."
+        - "Reconstructing a period total by summing per-slice distinct counts."
+      misinterpretations:
+        - "Reading sessions as users (a user has multiple sessions) or as pageviews (a session has many events)."
+        - "Assuming sessions are independent across the funnel - reached_* flags are computed within the same session."
+      simpsons_paradox_risk: "PRIMARY weight in every rate metric: because rates are SUM(num)/SUM(den) over sessions, a shift in the sessions distribution across segments can reverse the direction of an aggregate rate vs every segment rate. Always decompose mix (sessions weight) vs rate."
+      attribution_pitfalls: "Sessions are attributed to a single session-scoped channel_group/source/medium; a multi-touch journey is split into independent sessions, so channel-sliced sessions over-represent re-entry channels."
+      segmentation_pitfalls: "Non-additive: sum of distinct sessions over slices >= the ungrouped total when sessions appear under multiple values is impossible per session, but day-rollups still require recompute, not addition."
+    root_cause:
+      upstream_drivers: [users, new_users, returning_users]
+      downstream_impacts: [session_conversion_rate, engagement_rate, view_to_cart_rate, cart_to_checkout_rate, checkout_to_purchase_rate, revenue_per_session, traffic_share, view_item_sessions]
+      related_dimensions: [channel_group, device_category, landing_page]
+      decomposition_path: "Split by channel_group x device_category; sessions IS the mix weight w_i, so decompose_change attributes any aggregate-rate move to mix (sessions reweighting) vs rate (per-session behaviour) vs interaction; drill the largest mix or rate contributor."
+    agents: [Monitor, Decompose, Diagnose, Critic, Narrator]
+    validation_checks:
+      - "value >= 0 and integer"
+      - "sessions >= users at every grain (a user has one or more sessions)"
+      - "sessions >= view_item_sessions >= add_to_cart_sessions >= begin_checkout_sessions >= purchasing_sessions (monotonic funnel)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "unique (session_key on fct_funnel)", "dbt_utils.accepted_range: {min_value: 0}"]
+      quality_checks:
+        - "sessions >= users at every grain"
+        - "sessions >= each reached_* session count (funnel monotonicity)"
+      anomaly_checks: ["stl-residual on daily sessions series, weekly seasonality aware; spike-detect for bot floods"]
+      reconciliation_checks: ["semantic sessions vs fct_daily_funnel additive recompute within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # engaged_sessions  (GA4 engaged-session count)  [denominator for engagement_rate]
+  # ---------------------------------------------------------------------------
+  - metric_name: engaged_sessions
+    label: "Engaged Sessions"
+    category: traffic
+    type: count
+    business_definition: "Sessions that met the GA4 engaged-session bar: the session lasted 10+ seconds OR had a conversion/multiple pageviews, captured as session_engaged='1' OR engagement_time_msec >= 10000. A proxy for non-bounce, attention-bearing visits."
+    sql_definition: "COUNTIF(engaged_session)"
+    aggregation_method: countif
+    grain: fct_sessions
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "engaged_session is the boolean flag (session_engaged='1' OR engagement_time_msec >= 10000) materialized on fct_sessions; the 10s / engagement-time thresholds are GA4 platform defaults, not Helios choices."
+      - "Engagement is NOT conversion: an engaged session need not view a product or purchase. Do not read engaged_sessions as funnel progress."
+      - "engagement_time_msec can be under-reported when the GA4 SDK loses the page-visibility/heartbeat signal (background tabs, fast navigations), so engaged_sessions is a lower bound on genuine attention."
+      - "Lives on the fct_sessions grain (1 row/session), the same session universe as fct_funnel; the two reconcile at sessions."
+    common_mistakes:
+      - "Equating engaged_sessions with quality leads or with view_item_sessions - engagement and funnel entry are independent."
+      - "Counting engaged_sessions with COUNT(DISTINCT) - it is a COUNTIF over the (already distinct) session rows on fct_sessions."
+    guardrails:
+      do_not_use_when:
+        - "A conversion or revenue-intent measure is required - use funnel/conversion metrics instead."
+        - "Comparing across periods where the GA4 engagement_time instrumentation changed."
+      misinterpretations:
+        - "Reading 'engaged' as 'converted' or 'qualified'."
+        - "Assuming a bounce in GA4 (the complement) means zero value - a fast task completion can be a non-engaged session."
+      simpsons_paradox_risk: "Engaged-session counts shift with the sessions mix; a channel with naturally long sessions raises the aggregate even if no per-channel engagement improved."
+      attribution_pitfalls: "Engaged sessions inherit session-scoped channel attribution; high-engagement channels (e.g. Organic Search) over-index when sliced by channel_group."
+      segmentation_pitfalls: "Always pair engaged_sessions with sessions at the same slice so the engagement_rate is interpretable; a raw engaged-session count without its denominator hides mix effects."
+    root_cause:
+      upstream_drivers: [sessions]
+      downstream_impacts: [engagement_rate]
+      related_dimensions: [channel_group, device_category, landing_page]
+      decomposition_path: "Split by channel_group x device_category; compare engaged_sessions against sessions to isolate whether a move is volume (more sessions) or quality (higher engaged share); feed engagement_rate decompose_change."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 and integer"
+      - "engaged_sessions <= sessions at every grain"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0}"]
+      quality_checks:
+        - "engaged_sessions <= sessions at every grain"
+        - "engaged_session flag is boolean and equals (session_engaged='1' OR engagement_time_msec >= 10000)"
+      anomaly_checks: ["stl-residual on daily engaged-sessions series, weekly seasonality aware"]
+      reconciliation_checks: ["fct_sessions session universe reconciles to fct_funnel sessions within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # engagement_rate  (engaged_sessions / sessions)
+  # ---------------------------------------------------------------------------
+  - metric_name: engagement_rate
+    label: "Engagement Rate"
+    category: traffic
+    type: ratio
+    business_definition: "Share of sessions that were engaged: engaged_sessions / sessions. GA4's primary session-quality signal; the complement (1 - engagement_rate) is the bounce rate."
+    sql_definition: "SAFE_DIVIDE(COUNTIF(engaged_session), COUNT(DISTINCT session_key))"
+    aggregation_method: ratio
+    grain: fct_sessions
+    entity: session
+    numerator: engaged_sessions
+    denominator: sessions
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Computed as SUM(engaged_sessions)/SUM(sessions) AFTER grouping (never the average of per-row rates) - the Simpson's-paradox defense."
+      - "BOT / SPAM TRAFFIC DILUTES THE RATE: invalid traffic adds non-engaged sessions to the denominator, depressing engagement_rate even when human engagement is unchanged. A sudden engagement_rate drop is often a bot/referral-spam influx, not a UX regression - confirm against the sessions spike before diagnosing experience."
+      - "Engagement is NOT conversion: a high engagement_rate does not imply purchase intent."
+      - "Thresholds (10s / engagement-time) are GA4 platform defaults; a GA4 config change shifts the rate without any real behaviour change."
+    common_mistakes:
+      - "Averaging daily engagement_rate values instead of recomputing SUM(num)/SUM(den) over the period."
+      - "Interpreting a rate fall as a content problem when it is denominator dilution from bot or low-quality paid traffic."
+      - "Comparing engagement_rate across channels without noting that paid/display channels carry more non-engaged and bot sessions."
+    guardrails:
+      do_not_use_when:
+        - "Sessions are known to contain unfiltered bot/spam traffic - filter or segment it out first, or the rate is meaningless."
+        - "Periods straddle a GA4 engagement-time or filter configuration change."
+        - "As a conversion or revenue proxy - it measures attention, not intent."
+      misinterpretations:
+        - "Reading engagement_rate as conversion rate or as a guarantee of funnel progress."
+        - "Treating 1 - engagement_rate (bounce) as wasted traffic - quick task completions can be legitimate non-engaged sessions."
+      simpsons_paradox_risk: "HIGH: engagement_rate is a sessions-weighted ratio, so a shift in the sessions mix across channels/devices can move the aggregate opposite to every segment. Always decompose mix (sessions weight w_i) vs rate (per-segment engaged share) vs interaction."
+      attribution_pitfalls: "Channel-sliced engagement_rate reflects session-scoped attribution; re-entry/branded sessions inflate engaged share for Direct and Organic Search."
+      segmentation_pitfalls: "Low-volume slices give noisy rates; suppress or widen the window below a minimum sessions threshold before acting, and always report numerator and denominator alongside the rate."
+    root_cause:
+      upstream_drivers: [engaged_sessions, sessions]
+      downstream_impacts: [session_conversion_rate, revenue_per_session]
+      related_dimensions: [channel_group, device_category, landing_page]
+      decomposition_path: "Split by channel_group x device_category; run decompose_change (mix vs rate vs interaction) using sessions as the weight w_i; first rule out bot/spam denominator dilution (check the sessions spike) before attributing to UX or landing-page quality; drill the largest rate-effect."
+    agents: [Monitor, Decompose, Diagnose, Critic, Narrator]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "engagement_rate = engaged_sessions / sessions reconciles to its component metrics"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1}"]
+      quality_checks:
+        - "0 <= engagement_rate <= 1 at every grain"
+        - "numerator engaged_sessions <= denominator sessions at every grain"
+        - "engaged_sessions and sessions resolve to the same fct_sessions session universe"
+      anomaly_checks: ["stl-residual on daily engagement_rate series, weekly seasonality aware; cross-flag against a sessions spike to separate bot dilution from genuine quality change"]
+      reconciliation_checks: ["semantic engagement_rate vs fct_daily_funnel/fct_sessions additive recompute (SUM num / SUM den) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"

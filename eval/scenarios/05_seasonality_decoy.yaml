@@ -1,0 +1,185 @@
+- scenario_id: S033
+  title: "Post-holiday January conversion dip (post-holiday trough decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1033
+  baseline_window: {start: "2020-12-20", end: "2020-12-25"}
+  inject_at: "2021-01-02"
+  eval_window: {start: "2021-01-02", end: "2021-01-15"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~22% versus the Christmas peak (3.2% -> 2.5%) across the first two weeks of January; purchasing_sessions down ~28% over the eval window."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "post-holiday January trough 2021-01-02..2021-01-15"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~22% session_conversion_rate decline is fully explained by the post-holiday January trough (2021-01-02..2021-01-15): purchase intent collapses store-wide after the Christmas gifting peak. The apparent ~28% purchasing_sessions drop matches the prior-year seasonal pattern in the seasonality_calendar; no single segment drives it and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected seasonal post-holiday trough; apparent ~28% purchasing_sessions decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S034
+  title: "Black Friday revenue spike (Black Friday decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1034
+  baseline_window: {start: "2020-11-16", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-11-29"}
+  target_metric: revenue
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate revenue surged ~180% over Black Friday weekend versus the prior 10-day baseline; transactions up ~150% and revenue_per_session up ~35%."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Black Friday 2020-11-27"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~180% revenue surge is fully explained by Black Friday (2020-11-27): promotional demand lifts transactions and revenue_per_session store-wide. The apparent spike aligns with the Black Friday entry in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; this is an expected seasonal lift, NOT an actionable improvement to attribute to any change."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Black Friday promotional lift; apparent ~180% revenue spike is non-actionable seasonality, not injected gain."
+    direction: none
+
+- scenario_id: S035
+  title: "Cyber Monday traffic surge diluting conversion (looks like mix-shift, is seasonal)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1035
+  baseline_window: {start: "2020-11-20", end: "2020-11-29"}
+  inject_at: "2020-11-30"
+  eval_window: {start: "2020-11-30", end: "2020-12-02"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~18% on Cyber Monday (3.0% -> 2.5%) even as sessions surged ~120%; the shift in channel/device mix toward lower-intent Paid Search and Display traffic looks like a composition change."
+  perturbation:
+    dimension: [day, channel_group]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Cyber Monday 2020-11-30"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~18% session_conversion_rate dip is fully explained by Cyber Monday (2020-11-30): a ~120% sessions surge brings disproportionately more top-of-funnel Paid Search and Display visitors, mechanically diluting the aggregate rate. This resembles a mix-shift but is the expected Cyber Monday traffic composition recurring in the seasonality_calendar; no injected per-segment rate change exists and the decomposed mix/rate/interaction are all flat once normalized against the seasonal baseline. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Cyber Monday traffic-mix dilution; apparent ~18% conversion dip is non-actionable seasonality, not an injected mix-shift."
+    direction: none
+
+- scenario_id: S036
+  title: "January AOV trough (post-holiday January decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1036
+  baseline_window: {start: "2020-12-15", end: "2020-12-25"}
+  inject_at: "2021-01-05"
+  eval_window: {start: "2021-01-05", end: "2021-01-15"}
+  target_metric: aov
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate aov fell ~17% versus the Christmas window ($72 -> $60) in early-mid January; revenue_per_user down ~20% as basket sizes shrink after the gifting season."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "post-holiday January trough 2021-01-02..2021-01-15"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~17% aov decline is fully explained by the post-holiday January trough (2021-01-02..2021-01-15): multi-item gift baskets give way to smaller single-item self-purchases, lowering aov and revenue_per_user store-wide. The drop tracks the prior-year January pattern in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected post-holiday January AOV trough; apparent ~17% aov decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S037
+  title: "Christmas shipping cutoff purchase drop (Christmas peak decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1037
+  baseline_window: {start: "2020-12-10", end: "2020-12-19"}
+  inject_at: "2020-12-23"
+  eval_window: {start: "2020-12-23", end: "2020-12-25"}
+  target_metric: purchasing_sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate purchasing_sessions fell ~40% over 12-23..12-25 versus the early-December baseline as orders can no longer arrive by Christmas; checkout_to_purchase_rate also down ~15% in the same window."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "Christmas peak 2020-12-20..2020-12-25"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~40% purchasing_sessions decline over 2020-12-23..2020-12-25 is fully explained by the Christmas shipping cutoff at the tail of the Christmas peak (2020-12-20..2020-12-25): shoppers stop ordering once delivery can no longer arrive by Christmas, so purchases and checkout_to_purchase_rate fall store-wide. The pattern matches the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected Christmas shipping-cutoff demand drop; apparent ~40% purchasing_sessions decline is non-actionable seasonality, not injected loss."
+    direction: none
+
+- scenario_id: S038
+  title: "New Year traffic and conversion dip (New Year decoy)"
+  bucket: seasonality_decoy
+  anomaly_type: none
+  seed: 1038
+  baseline_window: {start: "2020-12-26", end: "2020-12-31"}
+  inject_at: "2021-01-01"
+  eval_window: {start: "2021-01-01", end: "2021-01-03"}
+  target_metric: sessions
+  funnel_step: {numerator: null, denominator: null}
+  anomaly: "Aggregate sessions fell ~30% on New Year's Day versus the late-December baseline, with view_item_sessions down ~33% and session_conversion_rate down ~12% as shoppers step away over the holiday."
+  perturbation:
+    dimension: [day]
+    segment: {}
+    rate_multiplier: null
+    volume_multiplier: null
+    hold_constant: []
+    seasonal_event: "New Year 2021-01-01"
+  ground_truth:
+    root_cause_segment: {}
+    dominant_effect: none
+    mix_rate_interaction: {mix: 0.000, rate: 0.000, interaction: 0.000}
+    is_seasonality_decoy: true
+    is_data_quality: false
+  expected_diagnosis: "The ~30% sessions decline around 2021-01-01 is fully explained by the New Year holiday: traffic and browsing (view_item_sessions) drop store-wide as shoppers are away, and session_conversion_rate softens with the lower-intent residual traffic. The dip aligns with the New Year entry in the seasonality_calendar; no segment is anomalous and mix/rate/interaction are all flat. Critic refutes via seasonality_calendar; there is NO actionable root cause."
+  expected_recommendation: "No action; continue monitoring; (movement is expected seasonality)."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 0
+    basis: "Expected New Year holiday traffic lull; apparent ~30% sessions decline is non-actionable seasonality, not injected loss."
+    direction: none

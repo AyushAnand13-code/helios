@@ -1,0 +1,582 @@
+# =============================================================================
+# Helios Semantic Layer — Cluster 03: FUNNEL + CONVERSION
+# =============================================================================
+# Canonical path (build fragment): models/semantic/_build/03_funnel_conversion.yaml
+# Merged into the production registry (models/semantic/semantic_models.yml) at compile time.
+#
+# SCOPE. Session-level funnel stage counts (view_item -> add_to_cart -> begin_checkout
+# -> purchase) and the step-over-step + end-to-end conversion rates derived from them,
+# plus the supporting measure purchasing_users that backs user_conversion_rate.
+#
+# CORE INVARIANT (read before editing any metric here):
+#   reached_* flags on fct_funnel are MAX-DOWNSTREAM MONOTONIC: reached_X is TRUE if the
+#   session reached step X OR any later stage. Therefore for any earlier step E and later
+#   step L: COUNTIF(reached_L) <= COUNTIF(reached_E). Every step-over-step rate
+#   (view->cart, cart->checkout, checkout->purchase) and the end-to-end
+#   session_conversion_rate is consequently ALWAYS in [0, 1] BY CONSTRUCTION. This is why
+#   the validation_checks assert 0 <= value <= 1 and the dbt accepted_range is 0..1.
+#
+# RATE COMPUTATION (Simpson's-paradox defense, Bible convention): every ratio is computed
+#   as SUM(numerator) / SUM(denominator) AFTER grouping — never AVG(per-row ratio). The
+#   conversion rates in this cluster are the PRIME mix-vs-rate decomposition targets for the
+#   Decompose and Critic agents: a blended rate can move purely because traffic MIX shifted
+#   across channel_group x device_category while every segment's rate held flat. Each
+#   conversion metric therefore (a) names that split in root_cause.decomposition_path and
+#   (b) calls out simpsons_paradox_risk explicitly in guardrails.
+#
+# SESSION vs USER conversion: session_conversion_rate has denominator = sessions;
+#   user_conversion_rate has denominator = users. They differ whenever a user has multiple
+#   sessions (the common case). A high-traffic user who buys once dilutes session conversion
+#   but counts once in user conversion. Never compare the two directly or substitute one for
+#   the other — they answer different questions (per-visit efficiency vs per-person reach).
+# =============================================================================
+
+metrics:
+
+  # ---------------------------------------------------------------------------
+  # FUNNEL STAGE COUNTS (category: funnel)
+  # COUNTIF over monotonic reached_* flags on fct_funnel; 1 row = 1 session.
+  # ---------------------------------------------------------------------------
+
+  - metric_name: view_item_sessions
+    label: "Product Views"
+    category: funnel
+    type: count
+    business_definition: "Number of sessions that reached the view_item step — i.e. sessions in which the user viewed at least one product detail page. Because reached_view_item is max-downstream monotonic, this also includes every session that progressed further (added to cart, checked out, or purchased). This is the TOP of the engaged purchase funnel and the denominator of view_to_cart_rate."
+    sql_definition: "COUNTIF(reached_view_item)"
+    aggregation_method: countif
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Session-grain, NOT event-grain: a session that views 5 products counts once. For per-product view volume use the item-level metrics in cluster 05 (item_views / item_view_sessions)."
+      - "Monotonic inclusion: this count contains all add_to_cart, begin_checkout and purchasing sessions. It is a CUMULATIVE stage reach, not the population of sessions that stopped at view_item."
+      - "Bot/internal traffic is not separately excluded here; rely on upstream fct_funnel filtering."
+    common_mistakes:
+      - "Treating it as 'sessions that ONLY viewed a product'. It includes deeper-funnel sessions because reached_* is max-downstream."
+      - "Summing view_item_sessions across overlapping date ranges and double-counting sessions; always count distinct within a single grouped window."
+      - "Using it as a product-popularity metric — it is session reach of the view_item STAGE, not product-level views."
+    guardrails:
+      do_not_use_when:
+        - "You need the count of sessions whose deepest step was exactly view_item (use view_item_sessions - add_to_cart_sessions for the 'stalled at view' population)."
+        - "You need per-product view demand (use cluster 05 item metrics)."
+      misinterpretations:
+        - "Interpreting a drop as fewer product views when it is actually fewer engaged sessions overall — always normalize against sessions."
+      simpsons_paradox_risk: "As a raw count this metric is additive and not itself rate-distorted, but feeding it as a denominator into view_to_cart_rate inherits Simpson's risk when traffic mix shifts."
+      attribution_pitfalls: "channel_group/source/medium reflect SESSION-level attribution (last non-direct in GA4), not user-journey attribution; a session's channel is not the user's acquisition channel."
+      segmentation_pitfalls: "landing_page slices can be noisy for low-volume pages; require a minimum session threshold before reading rate metrics built on this."
+    root_cause:
+      upstream_drivers: [sessions, engaged_sessions]
+      downstream_impacts: [add_to_cart_sessions, view_to_cart_rate, session_conversion_rate, revenue]
+      related_dimensions: [channel_group, device_category, landing_page, item_category]
+      decomposition_path: "Split by channel_group x device_category; compare view_item_sessions against sessions to isolate whether a change is a traffic-volume effect or an engagement (reach-to-view) effect, then drill landing_page within the largest-moving cell."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 (non-negative count)"
+      - "value <= sessions for every grouping cell (cannot exceed total sessions)"
+      - "value >= add_to_cart_sessions for every cell (monotonic funnel)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, inclusive: true}"]
+      quality_checks:
+        - "view_item_sessions <= sessions per day (funnel monotonicity at stage 1)"
+        - "view_item_sessions >= add_to_cart_sessions per day"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of COUNTIF(reached_view_item) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: add_to_cart_sessions
+    label: "Add to Cart"
+    category: funnel
+    type: count
+    business_definition: "Number of sessions that reached the add_to_cart step — sessions in which the user added at least one item to the cart. Monotonic: includes every session that also reached begin_checkout or purchase. Numerator of view_to_cart_rate and denominator of cart_to_checkout_rate."
+    sql_definition: "COUNTIF(reached_add_to_cart)"
+    aggregation_method: countif
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Session-grain: a session adding multiple items counts once."
+      - "Monotonic inclusion: contains all begin_checkout and purchasing sessions; not the population that stalled at the cart."
+      - "Cart adds can be removed later; this measures REACHING the add_to_cart stage, not net cart contents."
+    common_mistakes:
+      - "Reading it as units added to cart (it is sessions, not items or quantity)."
+      - "Assuming add_to_cart_sessions minus begin_checkout_sessions equals 'abandoned carts' without acknowledging users who re-engage in a later session."
+      - "Comparing across device_category without normalizing to view_item_sessions (mobile browses more, buys less)."
+    guardrails:
+      do_not_use_when:
+        - "You need cart-line or unit-level demand (use cluster 05 item metrics)."
+        - "You need true cart abandonment that follows the same USER across sessions (this is session-scoped)."
+      misinterpretations:
+        - "Interpreting a rise as buying intent when it can be promo-driven cart-stuffing that never converts."
+      simpsons_paradox_risk: "Raw additive count; risk enters when used as numerator (view_to_cart_rate) or denominator (cart_to_checkout_rate) under shifting channel/device mix."
+      attribution_pitfalls: "Channel reflects the session in which the add occurred, which may differ from the session that later purchases (cross-session attribution gap)."
+      segmentation_pitfalls: "campaign-level slices can be sparse; enforce minimum-volume gating before computing dependent rates."
+    root_cause:
+      upstream_drivers: [view_item_sessions, view_to_cart_rate]
+      downstream_impacts: [begin_checkout_sessions, cart_to_checkout_rate, view_to_cart_rate, session_conversion_rate, revenue]
+      related_dimensions: [channel_group, device_category, item_category, landing_page]
+      decomposition_path: "Split by channel_group x device_category; decompose change in add_to_cart_sessions into a view_item_sessions (traffic) component vs a view_to_cart_rate (intent) component; drill the largest rate-effect cell."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 (non-negative count)"
+      - "value <= view_item_sessions for every cell (monotonic funnel)"
+      - "value >= begin_checkout_sessions for every cell"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, inclusive: true}"]
+      quality_checks:
+        - "add_to_cart_sessions <= view_item_sessions per day"
+        - "add_to_cart_sessions >= begin_checkout_sessions per day"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of COUNTIF(reached_add_to_cart) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: begin_checkout_sessions
+    label: "Begin Checkout"
+    category: funnel
+    type: count
+    business_definition: "Number of sessions that reached the begin_checkout step — sessions in which the user entered the checkout flow. Monotonic: includes all purchasing sessions. Numerator of cart_to_checkout_rate and denominator of checkout_to_purchase_rate."
+    sql_definition: "COUNTIF(reached_begin_checkout)"
+    aggregation_method: countif
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Session-grain: one session counts once regardless of checkout retries within the session."
+      - "Monotonic inclusion: contains all purchasing sessions; not the population that stalled in checkout."
+      - "GA4's begin_checkout fires on checkout entry; downstream shipping/payment steps are intermediate and are not separately surfaced as named cluster-03 metrics."
+    common_mistakes:
+      - "Equating begin_checkout with intent-to-pay; many checkout starts bounce at shipping or payment."
+      - "Subtracting purchasing_sessions to call the remainder 'checkout abandonment' without noting cross-session completion."
+      - "Mixing this with order count — orders live at fct_orders grain (one row per transaction_id), not per session."
+    guardrails:
+      do_not_use_when:
+        - "You need payment-step or shipping-step granularity (not exposed as named metrics in this cluster)."
+        - "You need transaction counts (use the orders metric, cluster 01, fct_orders grain)."
+      misinterpretations:
+        - "Reading a checkout spike as imminent revenue; checkout_to_purchase_rate must be applied."
+      simpsons_paradox_risk: "Additive count; risk is inherited by cart_to_checkout_rate (numerator) and checkout_to_purchase_rate (denominator) under mix shifts."
+      attribution_pitfalls: "Checkout may occur in a different session/channel than the original product view; session attribution understates assisting channels."
+      segmentation_pitfalls: "Low-volume region/campaign cells produce unstable downstream rates; gate on minimum sessions."
+    root_cause:
+      upstream_drivers: [add_to_cart_sessions, cart_to_checkout_rate]
+      downstream_impacts: [purchasing_sessions, checkout_to_purchase_rate, cart_to_checkout_rate, session_conversion_rate, revenue]
+      related_dimensions: [channel_group, device_category, landing_page, country]
+      decomposition_path: "Split by channel_group x device_category; decompose change into add_to_cart_sessions (upstream volume) vs cart_to_checkout_rate (progression) components; drill the largest rate-effect cell, then inspect payment/shipping friction within it."
+    agents: [Monitor, Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 (non-negative count)"
+      - "value <= add_to_cart_sessions for every cell (monotonic funnel)"
+      - "value >= purchasing_sessions for every cell"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, inclusive: true}"]
+      quality_checks:
+        - "begin_checkout_sessions <= add_to_cart_sessions per day"
+        - "begin_checkout_sessions >= purchasing_sessions per day"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of COUNTIF(reached_begin_checkout) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: purchasing_sessions
+    label: "Purchases"
+    category: funnel
+    type: count
+    business_definition: "Number of sessions that reached the purchase step — sessions in which at least one transaction completed. This is the BOTTOM of the session funnel: numerator of checkout_to_purchase_rate, session_conversion_rate and channel_conversion_rate. Counts SESSIONS that purchased, not transactions (a session with two orders counts once) — distinct from the orders metric at fct_orders grain."
+    sql_definition: "COUNTIF(reached_purchase)"
+    aggregation_method: countif
+    grain: fct_funnel
+    entity: session
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Session-grain, NOT transaction-grain: a session containing multiple orders counts once. For transaction counts use orders (cluster 01, fct_orders)."
+      - "Purchasing sessions need not equal order count; they reconcile only at the grand-total level if every purchasing session has exactly one order."
+      - "Revenue attributed to these sessions is session_revenue (cluster 01 revenue), which reconciles to gross_revenue at grand total."
+    common_mistakes:
+      - "Using purchasing_sessions as transaction volume (it is the count of sessions with >=1 purchase, not the count of orders)."
+      - "Comparing purchasing_sessions to purchasing_users and treating them as interchangeable (a user can purchase across several sessions)."
+      - "Reading per-channel purchasing_sessions as channel-driven revenue without applying session attribution caveats."
+    guardrails:
+      do_not_use_when:
+        - "You need transaction counts or AOV (use orders / aov, cluster 01)."
+        - "You need de-duplicated buyers (use purchasing_users / user_conversion_rate)."
+      misinterpretations:
+        - "Interpreting purchasing_sessions as 'customers' — it is purchasing visits, not people."
+      simpsons_paradox_risk: "Additive count; the dependent rates (session_conversion_rate, channel_conversion_rate) are mix-sensitive and must be decomposed by channel_group x device_category."
+      attribution_pitfalls: "The purchasing session's channel gets full credit under last-touch session attribution; assisting channels in prior sessions are invisible."
+      segmentation_pitfalls: "Purchase is the rarest funnel event; small cells (campaign, region) have high variance — gate on minimum sessions and widen the window before reading rates."
+    root_cause:
+      upstream_drivers: [begin_checkout_sessions, checkout_to_purchase_rate]
+      downstream_impacts: [session_conversion_rate, checkout_to_purchase_rate, channel_conversion_rate, revenue, revenue_per_session]
+      related_dimensions: [channel_group, device_category, landing_page, country]
+      decomposition_path: "Split by channel_group x device_category; decompose change into begin_checkout_sessions (upstream volume) vs checkout_to_purchase_rate (close rate) components; drill the largest rate-effect cell and confirm against session_conversion_rate end-to-end."
+    agents: [Monitor, Decompose, Diagnose, Critic, Narrator]
+    validation_checks:
+      - "value >= 0 (non-negative count)"
+      - "value <= begin_checkout_sessions for every cell (monotonic funnel)"
+      - "value <= sessions for every cell"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, inclusive: true}"]
+      quality_checks:
+        - "purchasing_sessions <= begin_checkout_sessions per day"
+        - "purchasing_sessions <= sessions per day"
+        - "grand-total purchasing_sessions vs orders within 5% (alerts on multi-order sessions)"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of COUNTIF(reached_purchase) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # CONVERSION RATES (category: conversion)
+  # All ratios; SUM(num)/SUM(den) after grouping. PRIME mix-vs-rate decomposition
+  # targets — every one names channel_group x device_category and flags Simpson's.
+  # All bounded [0,1] by funnel monotonicity. These are the Prescribe primary metrics.
+  # ---------------------------------------------------------------------------
+
+  - metric_name: view_to_cart_rate
+    label: "View-to-Cart Rate"
+    category: conversion
+    type: ratio
+    business_definition: "Of the sessions that reached the view_item stage, the share that went on to reach add_to_cart. Measures product-page-to-cart intent. Computed as SUM(add_to_cart_sessions)/SUM(view_item_sessions) after grouping so that segment volumes are correctly weighted (never an average of per-segment rates)."
+    sql_definition: "SAFE_DIVIDE(COUNTIF(reached_add_to_cart), COUNTIF(reached_view_item))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: session
+    numerator: add_to_cart_sessions
+    denominator: view_item_sessions
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Always in [0,1] because reached_add_to_cart implies reached_view_item (monotonic flags)."
+      - "Compute as SUM(num)/SUM(den) after grouping, never AVG of row/segment rates — averaging un-weights large segments and invites Simpson's paradox."
+      - "Session-scoped intent, not user intent: a user browsing across many sessions is multiple denominators."
+      - "SAFE_DIVIDE returns NULL when there are zero view_item_sessions; treat NULL cells as 'no data', not zero."
+    common_mistakes:
+      - "Averaging device-level rates to get the overall rate (mix-weight error)."
+      - "Comparing blended rate across periods when traffic mix shifted — a flat per-segment rate can still move the blend (Simpson's)."
+      - "Reading it as add-to-cart of all sessions; the denominator is view_item_sessions, not sessions."
+    guardrails:
+      do_not_use_when:
+        - "Comparing two periods or segments whose channel_group/device_category mix differs materially — decompose mix vs rate first."
+        - "Denominator (view_item_sessions) is below the minimum-volume gate; the rate is statistically unstable."
+      misinterpretations:
+        - "Treating a blended-rate movement as a UX/product change when it is a traffic-mix change."
+        - "Assuming higher view-to-cart always lifts revenue; downstream cart->checkout->purchase can offset it."
+      simpsons_paradox_risk: "HIGH. Mobile typically has lower view-to-cart and far higher traffic share; a mix shift toward mobile drags the blended rate down even if every device's rate rose. ALWAYS decompose by channel_group x device_category (mix vs rate vs interaction) before drawing a conclusion."
+      attribution_pitfalls: "Channel is the viewing session's last-non-direct source; cart-add intent generated by an earlier assisting channel is mis-credited."
+      segmentation_pitfalls: "landing_page and campaign cells go sparse fast; enforce a minimum view_item_sessions threshold and prefer wider windows for low-volume segments."
+    root_cause:
+      upstream_drivers: [add_to_cart_sessions, view_item_sessions]
+      downstream_impacts: [session_conversion_rate, cart_to_checkout_rate, revenue, revenue_per_session]
+      related_dimensions: [device_category, channel_group, landing_page, item_category]
+      decomposition_path: "Split by channel_group x device_category; run decompose_change to separate mix effect (traffic re-weighting) from rate effect (within-segment intent) from interaction; drill the largest rate-effect cell, then inspect landing_page and item_category inside it."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic, Narrator]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "value = SUM(add_to_cart_sessions)/SUM(view_item_sessions) per grouped cell (mix-weighted, not averaged)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1, inclusive: true}"]
+      quality_checks:
+        - "view_to_cart_rate <= 1 for every cell (monotonic-flag guarantee)"
+        - "blended rate equals SUM(num)/SUM(den), validated against per-cell recompute"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of SUM(add_to_cart_sessions)/SUM(view_item_sessions) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: cart_to_checkout_rate
+    label: "Cart-to-Checkout Rate"
+    category: conversion
+    type: ratio
+    business_definition: "Of the sessions that reached add_to_cart, the share that went on to reach begin_checkout. Measures cart-to-checkout progression (cart commitment). Computed as SUM(begin_checkout_sessions)/SUM(add_to_cart_sessions) after grouping."
+    sql_definition: "SAFE_DIVIDE(COUNTIF(reached_begin_checkout), COUNTIF(reached_add_to_cart))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: session
+    numerator: begin_checkout_sessions
+    denominator: add_to_cart_sessions
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Always in [0,1]: reached_begin_checkout implies reached_add_to_cart (monotonic flags)."
+      - "SUM(num)/SUM(den) after grouping, never an average of segment rates."
+      - "1 - cart_to_checkout_rate is the within-session cart-abandonment-before-checkout share, but only within the SAME session (cross-session completers are not credited back)."
+      - "SAFE_DIVIDE returns NULL on zero add_to_cart_sessions; NULL means no data, not 0."
+    common_mistakes:
+      - "Calling 1 minus this rate 'cart abandonment' without the within-session caveat."
+      - "Averaging segment rates instead of mix-weighting (Simpson's)."
+      - "Comparing across mix-shifted periods without decomposition."
+    guardrails:
+      do_not_use_when:
+        - "Mix of channel_group/device_category differs between the compared groups — decompose first."
+        - "add_to_cart_sessions is below the minimum-volume gate."
+      misinterpretations:
+        - "Reading a dip as checkout-button friction when it is a mix shift toward low-progression segments."
+      simpsons_paradox_risk: "HIGH. Cart commitment varies sharply by device_category and channel_group; a blend can fall while every segment rises if traffic re-weights toward weaker segments. Decompose by channel_group x device_category before concluding."
+      attribution_pitfalls: "Session last-touch attribution credits the checkout-starting session's channel; the cart may have been built in a prior session/channel."
+      segmentation_pitfalls: "campaign/region cells are sparse; gate on minimum add_to_cart_sessions."
+    root_cause:
+      upstream_drivers: [begin_checkout_sessions, add_to_cart_sessions]
+      downstream_impacts: [session_conversion_rate, checkout_to_purchase_rate, revenue]
+      related_dimensions: [device_category, channel_group, landing_page, country]
+      decomposition_path: "Split by channel_group x device_category; run decompose_change (mix vs rate vs interaction); drill the largest rate-effect cell and inspect cart UX / shipping-cost reveal as a friction hypothesis."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "value = SUM(begin_checkout_sessions)/SUM(add_to_cart_sessions) per grouped cell"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1, inclusive: true}"]
+      quality_checks:
+        - "cart_to_checkout_rate <= 1 for every cell"
+        - "blended rate equals SUM(num)/SUM(den) on per-cell recompute"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of SUM(begin_checkout_sessions)/SUM(add_to_cart_sessions) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: checkout_to_purchase_rate
+    label: "Checkout-to-Purchase Rate"
+    category: conversion
+    type: ratio
+    business_definition: "Of the sessions that reached begin_checkout, the share that completed a purchase. Measures the checkout close rate (payment/shipping completion). Computed as SUM(purchasing_sessions)/SUM(begin_checkout_sessions) after grouping. This is typically the highest-leverage friction point for revenue recovery."
+    sql_definition: "SAFE_DIVIDE(COUNTIF(reached_purchase), COUNTIF(reached_begin_checkout))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: session
+    numerator: purchasing_sessions
+    denominator: begin_checkout_sessions
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Always in [0,1]: reached_purchase implies reached_begin_checkout (monotonic flags)."
+      - "SUM(num)/SUM(den) after grouping, never averaged across segments."
+      - "1 - checkout_to_purchase_rate approximates within-session checkout abandonment, but a user may complete the purchase in a later session/channel."
+      - "SAFE_DIVIDE returns NULL on zero begin_checkout_sessions; NULL = no data."
+    common_mistakes:
+      - "Treating the complement as exact checkout abandonment without the cross-session caveat."
+      - "Averaging per-segment close rates (mix-weight error)."
+      - "Comparing periods with different device/channel mix without decomposition."
+    guardrails:
+      do_not_use_when:
+        - "Compared groups differ in channel_group/device_category mix — decompose mix vs rate first."
+        - "begin_checkout_sessions is below the minimum-volume gate (purchase is rare; small denominators are very noisy)."
+      misinterpretations:
+        - "Reading a drop as a payment-gateway bug when it is a mix shift toward low-close segments (e.g., new-user mobile)."
+        - "Assuming this rate alone predicts revenue; AOV and traffic volume co-determine revenue."
+      simpsons_paradox_risk: "HIGH. Checkout close rate differs strongly by device_category (desktop closes far better than mobile) and by is_new_user; a blend can move purely from mix re-weighting. ALWAYS decompose by channel_group x device_category before attributing to checkout UX."
+      attribution_pitfalls: "Last-touch session attribution gives the closing session's channel full credit; assisting channels are invisible, inflating direct/email close rates."
+      segmentation_pitfalls: "Purchase is the rarest event; campaign/region/landing_page cells need minimum-volume gating and wider windows or rates swing wildly."
+    root_cause:
+      upstream_drivers: [purchasing_sessions, begin_checkout_sessions]
+      downstream_impacts: [session_conversion_rate, revenue, revenue_per_session, aov]
+      related_dimensions: [device_category, channel_group, country, operating_system]
+      decomposition_path: "Split by channel_group x device_category; run decompose_change (mix vs rate vs interaction); drill the largest rate-effect cell, then test payment-method / shipping-cost / form-friction hypotheses within it (Prescribe candidate experiment)."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic, Narrator]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "value = SUM(purchasing_sessions)/SUM(begin_checkout_sessions) per grouped cell"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1, inclusive: true}"]
+      quality_checks:
+        - "checkout_to_purchase_rate <= 1 for every cell"
+        - "blended rate equals SUM(num)/SUM(den) on per-cell recompute"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of SUM(purchasing_sessions)/SUM(begin_checkout_sessions) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: session_conversion_rate
+    label: "Session Conversion Rate"
+    category: conversion
+    type: ratio
+    business_definition: "Of all sessions, the share that reached a purchase — the end-to-end per-visit conversion rate. Computed as SUM(purchasing_sessions)/SUM(sessions) after grouping. This is the headline funnel KPI and a primary experiment metric; it equals the product of the three step rates (view_to_cart x cart_to_checkout x checkout_to_purchase) scaled by the view_item reach rate."
+    sql_definition: "SAFE_DIVIDE(COUNTIF(reached_purchase), COUNT(DISTINCT session_key))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: session
+    numerator: purchasing_sessions
+    denominator: sessions
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Always in [0,1]: purchasing_sessions <= sessions by construction."
+      - "PER-VISIT, not per-person: denominator is sessions. Differs from user_conversion_rate whenever users have multiple sessions (the norm). A user who visits 5 times and buys once contributes 1/5 here but counts as a converter in user_conversion_rate."
+      - "SUM(num)/SUM(den) after grouping; never average per-segment rates."
+      - "SAFE_DIVIDE returns NULL on zero sessions; NULL = no data, not 0."
+    common_mistakes:
+      - "Substituting it for user_conversion_rate or comparing the two directly — they answer different questions."
+      - "Averaging device/channel rates instead of mix-weighting."
+      - "Attributing a blended-rate change to product/UX when it is a traffic-mix change (Simpson's)."
+    guardrails:
+      do_not_use_when:
+        - "You need per-PERSON conversion or de-duplicated buyers (use user_conversion_rate)."
+        - "Compared groups differ in channel_group/device_category mix — decompose first."
+        - "Sessions in a cell are below the minimum-volume gate."
+      misinterpretations:
+        - "Reading session conversion as 'percent of customers who bought' (it is percent of VISITS)."
+        - "Assuming a flat overall rate means nothing changed — offsetting segment moves can cancel in the blend."
+      simpsons_paradox_risk: "HIGH — this is the canonical example. Mobile dominates session volume but converts far below desktop; a shift toward mobile traffic lowers the blended session_conversion_rate even when every device's rate is flat or rising. The Decompose and Critic agents MUST split by channel_group x device_category (mix vs rate vs interaction) before any conclusion."
+      attribution_pitfalls: "Per-session last-non-direct attribution credits the converting session's channel; multi-session journeys mis-credit the final channel and starve assisting channels."
+      segmentation_pitfalls: "campaign/region/landing_page cells are sparse for the rare purchase event; enforce minimum-session gating and widen windows."
+    root_cause:
+      upstream_drivers: [purchasing_sessions, sessions, checkout_to_purchase_rate, cart_to_checkout_rate, view_to_cart_rate]
+      downstream_impacts: [revenue, revenue_per_session, revenue_per_user]
+      related_dimensions: [device_category, channel_group, landing_page]
+      decomposition_path: "Split by channel_group x device_category; run decompose_change (mix vs rate vs interaction) to separate a traffic-mix shift from a true within-segment conversion change; drill the largest rate-effect cell, then walk the step funnel (view_to_cart -> cart_to_checkout -> checkout_to_purchase) to localize the leaking stage."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic, Narrator]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "value = SUM(purchasing_sessions)/SUM(sessions) per grouped cell (mix-weighted)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1, inclusive: true}"]
+      quality_checks:
+        - "session_conversion_rate <= 1 for every cell"
+        - "blended rate equals SUM(num)/SUM(den) on per-cell recompute"
+        - "session_conversion_rate <= user_conversion_rate at grand total (more sessions than users dilutes the per-visit rate)"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs fct_daily_funnel additive recompute of SUM(purchasing_sessions)/SUM(sessions) within 0.5%"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  - metric_name: user_conversion_rate
+    label: "User Conversion Rate"
+    category: conversion
+    type: ratio
+    business_definition: "Of all distinct users, the share who purchased in at least one session — the per-person conversion rate. Computed as SUM(purchasing_users)/SUM(users) after grouping. Answers 'what fraction of PEOPLE bought', as opposed to session_conversion_rate which answers 'what fraction of VISITS converted'."
+    sql_definition: "SAFE_DIVIDE(COUNT(DISTINCT IF(reached_purchase, user_pseudo_id, NULL)), COUNT(DISTINCT user_pseudo_id))"
+    aggregation_method: ratio
+    grain: fct_funnel
+    entity: user
+    numerator: purchasing_users
+    denominator: users
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Always in [0,1]: purchasing_users <= users by construction."
+      - "PER-PERSON, not per-visit: a user who buys in any of their sessions is one converter. Always >= session_conversion_rate at the same grain because users have >= 1 session each."
+      - "Distinct-count numerator and denominator are NON-ADDITIVE across dimension cells: a user appearing under two channels/devices is counted in each cell, so cells do not sum to the total. Recompute distinct at every grouping level — do not sum cell counts."
+      - "Slicing by a SESSION dimension (channel_group, device_category, landing_page) assigns a user to every value they touched; cross-cell user overlap is expected and the totals will not add up."
+      - "SAFE_DIVIDE returns NULL on zero users; NULL = no data."
+    common_mistakes:
+      - "Summing per-cell purchasing_users or users across dimensions (distinct counts are not additive)."
+      - "Comparing user_conversion_rate to session_conversion_rate as if they were the same metric."
+      - "Averaging per-segment user rates instead of recomputing distinct counts at the grouped level."
+    guardrails:
+      do_not_use_when:
+        - "You need per-visit efficiency (use session_conversion_rate)."
+        - "You are slicing by a session-scoped dimension and need additive, non-overlapping cells (user identity spans sessions/channels)."
+        - "Users in a cell are below the minimum-volume gate."
+      misinterpretations:
+        - "Reading it as session conversion (it de-duplicates people, so it is mechanically higher)."
+        - "Expecting dimension cells to sum to the total — distinct users overlap across cells."
+      simpsons_paradox_risk: "HIGH. Per-person conversion varies by acquisition channel_group and device_category, and a mix shift re-weights the blend independently of any within-segment change; compounded by cross-cell user overlap from distinct counting. ALWAYS decompose by channel_group x device_category and recompute distinct counts per cell — never sum cells."
+      attribution_pitfalls: "A user touches multiple channels across sessions; assigning the user to a single channel for this rate is inherently lossy. Session-level last-touch under-credits assisting channels and double-assigns multi-channel users across cells."
+      segmentation_pitfalls: "Because users span sessions, dimension slices double-count users across cells; never present per-cell user counts as a partition of the total."
+    root_cause:
+      upstream_drivers: [purchasing_users, users]
+      downstream_impacts: [revenue_per_user, revenue]
+      related_dimensions: [channel_group, device_category, is_new_user]
+      decomposition_path: "Split by channel_group x device_category, recomputing distinct purchasing_users and users WITHIN each cell (never summing cells); run decompose_change (mix vs rate vs interaction); drill the largest rate-effect cell and contrast against session_conversion_rate to see whether the move is per-person reach or per-visit efficiency."
+    agents: [Monitor, Decompose, Diagnose, Prescribe, Critic, Narrator]
+    validation_checks:
+      - "0 <= value <= 1"
+      - "value = SUM(purchasing_users)/SUM(users) recomputed distinct per grouped cell"
+      - "value >= session_conversion_rate at the same grain (per-person >= per-visit)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, max_value: 1, inclusive: true}"]
+      quality_checks:
+        - "user_conversion_rate <= 1 for every cell"
+        - "user_conversion_rate >= session_conversion_rate at grand total"
+        - "distinct-count numerator/denominator recomputed per cell (not summed)"
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs warehouse recompute of distinct purchasing_users/users within 0.5% (NOTE: not validated against additive fct_daily_funnel because distinct user counts are non-additive)"]
+    freshness_requirements: "daily; available <=36h after event_date"
+
+  # ---------------------------------------------------------------------------
+  # SUPPORTING MEASURES (category: supporting)
+  # Defined in THIS cluster because user_conversion_rate (above) consumes it.
+  # ---------------------------------------------------------------------------
+
+  - metric_name: purchasing_users
+    label: "Purchasing Users"
+    category: supporting
+    type: count
+    business_definition: "Number of DISTINCT users who reached the purchase step in at least one session within the period. Backs user_conversion_rate (numerator). Counts PEOPLE, not sessions or transactions: a user who purchases across several sessions counts once."
+    sql_definition: "COUNT(DISTINCT IF(reached_purchase, user_pseudo_id, NULL))"
+    aggregation_method: count_distinct
+    grain: fct_funnel
+    entity: user
+    numerator: null
+    denominator: null
+    expr: null
+    dimensions_supported: [device_category, operating_system, browser, country, region, channel_group, source, medium, campaign, landing_page, is_new_user, session_number_bucket, day, week, month, quarter]
+    owner: analytics-eng
+    version: 1.0.0
+    caveats:
+      - "Distinct-user count: NON-ADDITIVE across dimension cells and across time buckets. A user buying under two channels/devices counts in each cell, so cells do not sum to the total; a user purchasing on two days counts in each day but once in the period total. Recompute distinct at the desired grain — never sum."
+      - "Differs from purchasing_sessions (sessions with a purchase) and from orders (transactions): one purchasing user can produce many purchasing sessions and many orders."
+      - "Slicing by a session dimension assigns the user to every value they touched (cross-cell overlap)."
+    common_mistakes:
+      - "Summing daily purchasing_users to get a monthly figure (over-counts repeat buyers)."
+      - "Equating purchasing_users with orders or purchasing_sessions."
+      - "Summing per-channel purchasing_users to a total (distinct counts overlap across cells)."
+    guardrails:
+      do_not_use_when:
+        - "You need additive period roll-ups (distinct counts are non-additive — recompute at the target grain)."
+        - "You need transaction volume (use orders) or purchasing-visit volume (use purchasing_sessions)."
+      misinterpretations:
+        - "Reading it as purchase count — it is distinct buyers."
+      simpsons_paradox_risk: "As a count it is not itself a rate, but as the numerator of user_conversion_rate it inherits mix sensitivity; recompute distinct per cell and decompose by channel_group x device_category."
+      attribution_pitfalls: "A multi-channel user is assigned to every channel they touched when sliced, double-counting that user across channel cells."
+      segmentation_pitfalls: "Never present per-cell purchasing_users as a partition of the total; cells overlap because user identity spans sessions and channels."
+    root_cause:
+      upstream_drivers: [users, purchasing_sessions]
+      downstream_impacts: [user_conversion_rate, revenue_per_user]
+      related_dimensions: [channel_group, device_category, is_new_user]
+      decomposition_path: "Split by channel_group x device_category, recomputing distinct purchasing_users within each cell (never summing); feed user_conversion_rate's mix-vs-rate decomposition."
+    agents: [Decompose, Diagnose, Critic]
+    validation_checks:
+      - "value >= 0 (non-negative distinct count)"
+      - "value <= users for every cell (cannot exceed distinct users)"
+      - "value <= purchasing_sessions at the same grain (a purchasing user has >= 1 purchasing session)"
+      - "reconciles to warehouse-mcp.reconcile within 0.5%"
+    testing:
+      dbt_tests: ["not_null", "dbt_utils.accepted_range: {min_value: 0, inclusive: true}"]
+      quality_checks:
+        - "purchasing_users <= users per grouped cell"
+        - "period-total purchasing_users recomputed distinct (not summed from daily) "
+      anomaly_checks: ["stl-residual on daily series, weekly seasonality aware"]
+      reconciliation_checks: ["semantic vs warehouse recompute of COUNT(DISTINCT purchasing user_pseudo_id) within 0.5% (NOTE: non-additive — not reconciled against summed fct_daily_funnel cells)"]
+    freshness_requirements: "daily; available <=36h after event_date"

@@ -1,0 +1,205 @@
+- scenario_id: S021
+  title: "iOS Safari + iOS Chrome checkout-to-purchase rate collapse (payment SDK)"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1021
+  baseline_window: {start: "2020-12-01", end: "2020-12-20"}
+  inject_at: "2020-12-21"
+  eval_window: {start: "2020-12-21", end: "2021-01-10"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate fell ~13% week-over-week (54% -> 47%) over the eval window; overall purchasing_sessions down ~8% with begin_checkout_sessions roughly flat."
+  perturbation:
+    dimension: [operating_system, browser]
+    segment: {operating_system: "iOS", browser: "Safari"}
+    secondary_segments:
+      - {operating_system: "iOS", browser: "Chrome"}
+    rate_multiplier: 0.62
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {operating_system: "iOS", browser: "Safari"}
+    also_affected_segments:
+      - {operating_system: "iOS", browser: "Chrome"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.070, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine rate-change shared across iOS browsers: checkout_to_purchase_rate (purchasing_sessions/begin_checkout_sessions) dropped ~38% in iOS x Safari and ~38% in iOS x Chrome, while Android and desktop cells held flat. Mix across OS/browser is unchanged, so this is in-segment behavior. Top-3 affected cells: iOS x Safari (primary), iOS x Chrome, then a faint iOS aggregate echo. Points to a payment SDK regression on iOS WebView, not Safari-specific rendering. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Roll back / hotfix the iOS payment SDK (the WebKit-shared payment sheet) affecting both Safari and in-app Chrome on iOS; ship a canary to iOS traffic and verify Apple Pay token round-trip. Primary: checkout_to_purchase_rate; guardrails: checkout_abandonment_rate, net_revenue, aov. Size via power_analysis on iOS begin_checkout_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 61000
+    basis: "(rate_t0 - rate_t1) * begin_checkout_sessions_t1 * aov, summed over the iOS Safari and iOS Chrome cells across eval_window"
+    direction: loss
+
+- scenario_id: S022
+  title: "Email + Affiliates session_conversion_rate drop from broken promo redirect"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1022
+  baseline_window: {start: "2020-11-05", end: "2020-11-22"}
+  inject_at: "2020-11-23"
+  eval_window: {start: "2020-11-23", end: "2020-12-13"}
+  target_metric: session_conversion_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: sessions}
+  anomaly: "Aggregate session_conversion_rate fell ~9% week-over-week (2.9% -> 2.6%) across the eval window despite a Black Friday traffic surge; purchasing_sessions underperformed the sessions ramp."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Email"}
+    secondary_segments:
+      - {channel_group: "Affiliates"}
+    rate_multiplier: 0.65
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Email"}
+    also_affected_segments:
+      - {channel_group: "Affiliates"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.0028, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change: session_conversion_rate (purchasing_sessions/sessions) fell ~35% within Email and ~35% within Affiliates, while Direct, Organic Search, and Paid Search converted normally through Black Friday. Channel mix shift (more BF traffic) is decomposed out and contributes ~0; the effect is in-segment rate. Top-3 affected cells: Email (primary), Affiliates, then a minor Other echo. Both channels share a promo-code landing redirect, implicating a broken redirect/coupon-attach rather than seasonality. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the shared promo-redirect / coupon-attach path used by Email and Affiliate links (validate the deeplink lands on a valid cart with code applied). Primary: session_conversion_rate; guardrails: revenue_per_session, cart_abandonment_rate, net_revenue. Size via power_analysis on combined Email+Affiliates sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 54000
+    basis: "(rate_t0 - rate_t1) * sessions_t1 * aov, summed over the Email and Affiliates cells across eval_window"
+    direction: loss
+
+- scenario_id: S023
+  title: "Apparel + Bags + Drinkware view_to_cart_rate decline after PDP pricing change"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1023
+  baseline_window: {start: "2021-01-01", end: "2021-01-15"}
+  inject_at: "2021-01-16"
+  eval_window: {start: "2021-01-16", end: "2021-01-31"}
+  target_metric: view_to_cart_rate
+  funnel_step: {numerator: add_to_cart_sessions, denominator: view_item_sessions}
+  anomaly: "Aggregate view_to_cart_rate fell ~10% week-over-week (28% -> 25%) over the eval window; add_to_cart_sessions down ~9% with view_item_sessions roughly flat."
+  perturbation:
+    dimension: [item_category]
+    segment: {item_category: "Apparel"}
+    secondary_segments:
+      - {item_category: "Bags"}
+      - {item_category: "Drinkware"}
+    rate_multiplier: 0.78
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {item_category: "Apparel"}
+    also_affected_segments:
+      - {item_category: "Bags"}
+      - {item_category: "Drinkware"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.030, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change across three categories: view_to_cart_rate (add_to_cart_sessions/view_item_sessions) dropped ~22% in Apparel, ~22% in Bags, and ~22% in Drinkware, while Office, Accessories, and Lifestyle held flat. Category mix is stable, so this is in-segment add-to-cart behavior, not a shift toward low-converting catalogs. Top-3 affected cells: Apparel (primary, largest volume), Bags, Drinkware. The common thread is a PDP price-display/strikethrough change applied to these catalogs post-holiday, not the January trough (post-holiday demand is decomposed out as ~0). Reconciles; significant (p<0.05)."
+  expected_recommendation: "Revert or A/B the PDP pricing-display change (strikethrough/MSRP rendering) on Apparel, Bags, and Drinkware product pages. Primary: view_to_cart_rate; guardrails: aov, cart_abandonment_rate, revenue_per_session. Size via power_analysis on combined view_item_sessions for the three categories."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 47000
+    basis: "(rate_t0 - rate_t1) * view_item_sessions_t1 * downstream_purchase_rate * aov, summed over Apparel, Bags, Drinkware across eval_window"
+    direction: loss
+
+- scenario_id: S024
+  title: "United States + Canada cart_to_checkout_rate drop from shipping-calculator bug"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1024
+  baseline_window: {start: "2020-12-05", end: "2020-12-24"}
+  inject_at: "2020-12-26"
+  eval_window: {start: "2020-12-26", end: "2021-01-15"}
+  target_metric: cart_to_checkout_rate
+  funnel_step: {numerator: begin_checkout_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_to_checkout_rate fell ~12% week-over-week (64% -> 56%) over the eval window; begin_checkout_sessions down ~10% with add_to_cart_sessions roughly flat."
+  perturbation:
+    dimension: [country]
+    segment: {country: "United States"}
+    secondary_segments:
+      - {country: "Canada"}
+    rate_multiplier: 0.72
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {country: "United States"}
+    also_affected_segments:
+      - {country: "Canada"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: -0.075, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change in North America: cart_to_checkout_rate (begin_checkout_sessions/add_to_cart_sessions) fell ~28% in the United States and ~28% in Canada, while United Kingdom, Germany, and Japan stepped to checkout normally. Country mix is flat, so this is in-segment behavior, not a geo traffic-mix shift. Top-3 affected cells: United States (primary), Canada, then a minor North-America aggregate echo. Both share the USD/CAD shipping-calculator region; implicates a shipping-cost estimator failure at the cart->checkout transition, not the New Year lull. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Fix the North American shipping-cost calculator invoked at begin_checkout for US and CA locales (verify rate-table lookup and zip/postal validation). Primary: cart_to_checkout_rate; guardrails: cart_abandonment_rate, checkout_to_purchase_rate, net_revenue. Size via power_analysis on combined US+CA add_to_cart_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 72000
+    basis: "(rate_t0 - rate_t1) * add_to_cart_sessions_t1 * downstream_purchase_rate * aov, summed over United States and Canada across eval_window"
+    direction: loss
+
+- scenario_id: S025
+  title: "Windows Chrome + Windows Edge checkout_to_purchase_rate recovery after autofill fix"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1025
+  baseline_window: {start: "2020-11-08", end: "2020-11-26"}
+  inject_at: "2020-11-27"
+  eval_window: {start: "2020-11-27", end: "2020-12-17"}
+  target_metric: checkout_to_purchase_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: begin_checkout_sessions}
+  anomaly: "Aggregate checkout_to_purchase_rate rose ~11% week-over-week (52% -> 58%) over the eval window; purchasing_sessions up ~9% with begin_checkout_sessions roughly flat."
+  perturbation:
+    dimension: [operating_system, browser]
+    segment: {operating_system: "Windows", browser: "Chrome"}
+    secondary_segments:
+      - {operating_system: "Windows", browser: "Edge"}
+    rate_multiplier: 1.30
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {operating_system: "Windows", browser: "Chrome"}
+    also_affected_segments:
+      - {operating_system: "Windows", browser: "Edge"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.060, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate IMPROVEMENT across Chromium-on-Windows: checkout_to_purchase_rate (purchasing_sessions/begin_checkout_sessions) rose ~30% in Windows x Chrome and ~30% in Windows x Edge, while Macintosh and iOS cells were unchanged. Mix is flat, so this is in-segment lift, not a favorable device-mix shift, and it persists past the Black Friday spike (seasonality decomposed to ~0). Top-3 affected cells: Windows x Chrome (primary), Windows x Edge, then a Windows aggregate echo. Consistent with a deployed Chromium autofill/address-validation fix at checkout. Reconciles; significant (p<0.05)."
+  expected_recommendation: "Confirm the Chromium autofill/address-validation fix as the driver and extend the same payment-form improvements to non-Chromium browsers (Safari, Firefox). Primary: checkout_to_purchase_rate; guardrails: aov, cart_abandonment_rate, net_revenue. Size via power_analysis on Windows Chrome+Edge begin_checkout_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 58000
+    basis: "(rate_t1 - rate_t0) * begin_checkout_sessions_t1 * aov, summed over Windows Chrome and Windows Edge across eval_window"
+    direction: gain
+
+- scenario_id: S026
+  title: "Paid Social + Display cart_abandonment_rate spike from forced account-creation gate"
+  bucket: multi_segment_rate
+  anomaly_type: rate
+  seed: 1026
+  baseline_window: {start: "2020-12-01", end: "2020-12-19"}
+  inject_at: "2020-12-20"
+  eval_window: {start: "2020-12-20", end: "2021-01-09"}
+  target_metric: cart_abandonment_rate
+  funnel_step: {numerator: purchasing_sessions, denominator: add_to_cart_sessions}
+  anomaly: "Aggregate cart_abandonment_rate rose ~8% week-over-week (82% -> 88.5%) over the eval window; purchasing_sessions relative to add_to_cart_sessions deteriorated while add_to_cart_sessions held flat."
+  perturbation:
+    dimension: [channel_group]
+    segment: {channel_group: "Paid Social"}
+    secondary_segments:
+      - {channel_group: "Display"}
+    rate_multiplier: 1.08
+    volume_multiplier: null
+    hold_constant: [sessions]
+  ground_truth:
+    root_cause_segment: {channel_group: "Paid Social"}
+    also_affected_segments:
+      - {channel_group: "Display"}
+    dominant_effect: rate
+    mix_rate_interaction: {mix: 0.000, rate: 0.065, interaction: 0.000}
+    is_seasonality_decoy: false
+    is_data_quality: false
+  expected_diagnosis: "Genuine shared rate-change (a degradation): cart_abandonment_rate (1 - purchasing_sessions/add_to_cart_sessions) rose ~8 points in Paid Social and ~8 points in Display, while Direct, Organic Search, and Email abandoned at normal rates. Channel mix is flat, so the higher blended abandonment is in-segment, not driven by a swing toward cold paid traffic. Top-3 affected cells: Paid Social (primary), Display, then a minor paid-media aggregate echo. Both are cold first-touch paid audiences hitting a newly introduced forced account-creation gate before checkout; not a holiday artifact (Christmas peak decomposed to ~0). Reconciles; significant (p<0.05)."
+  expected_recommendation: "Remove or defer the forced account-creation gate for cold paid traffic (enable guest checkout for Paid Social and Display landings), then re-measure. Primary: cart_abandonment_rate; guardrails: checkout_to_purchase_rate, revenue_per_session, net_revenue. Size via power_analysis on combined Paid Social + Display add_to_cart_sessions."
+  expected_revenue_impact:
+    revenue_at_risk_usd: 43000
+    basis: "(rate_t1 - rate_t0) * add_to_cart_sessions_t1 * aov, summed over Paid Social and Display across eval_window (incremental abandoned carts)"
+    direction: loss

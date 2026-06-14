@@ -1,0 +1,38 @@
+# ── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ── dbt ──────────────────────────────────────────────
+target/
+dbt_packages/
+logs/
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# ── Secrets & credentials — NEVER commit ─────────────
+.env
+.env.*
+*.local
+**/service-account*.json
+**/*-sa.json
+**/credentials*.json
+gcp-key*.json
+# (Helios uses ADC / Workload Identity Federation — keep key files out of git entirely.)
+
+# ── Eval run outputs (keep the dir, ignore contents) ──
+eval/benchmark_results/*
+!eval/benchmark_results/.gitkeep
+
+# ── OS / editor ──────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
