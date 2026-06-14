@@ -13,7 +13,28 @@ import streamlit as st
 
 from helios.diagnosis import load_weekly, weeks_in, biggest_move, run_diagnosis, FUNNEL_STEPS
 
-st.set_page_config(page_title="Helios — Growth Diagnosis", page_icon="📉", layout="wide")
+st.set_page_config(page_title="Helios — Growth Diagnosis", layout="wide")
+
+# ---- look & feel: light CSS for a livelier, presentation-ready dashboard ----
+st.markdown(
+    """
+    <style>
+      [data-testid="stMetric"] {
+        background: #FFFFFF;
+        border: 1px solid #EFE2D4;
+        border-left: 5px solid #EA580C;
+        border-radius: 12px;
+        padding: 14px 18px;
+        box-shadow: 0 1px 4px rgba(80,40,0,0.06);
+      }
+      [data-testid="stMetricLabel"] p { color: #7A6A59; font-weight: 600; }
+      h3 { color: #B45309; padding-top: .3rem; }
+      .stButton > button { border-radius: 10px; font-weight: 600; }
+      [data-testid="stExpander"] { border-radius: 10px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 REGISTRY_PATH = Path(__file__).resolve().parent / "models" / "semantic" / "semantic_layer.yaml"
 
@@ -50,14 +71,24 @@ def get_data(project: str, dataset: str):
     return load_weekly(get_client(project), project, dataset)
 
 
-# ---- header ----
-st.title("📉 Helios — Autonomous Growth Diagnosis")
-st.caption("Governed mix-vs-rate funnel diagnosis on the GA4 Google Merchandise Store. "
-           "Every number is a governed-mart + deterministic-stats output — no LLM, no hand-written SQL.")
+# ---- header banner ----
+st.markdown(
+    """
+    <div style="background: linear-gradient(135deg,#9A3412 0%,#EA580C 55%,#F59E0B 100%);
+                padding: 1.5rem 1.8rem; border-radius: 16px; margin-bottom: 1.2rem;
+                box-shadow: 0 4px 18px rgba(180,83,9,0.25);">
+      <div style="color:#fff; font-size:2.05rem; font-weight:800; letter-spacing:.3px;">
+        Helios — Autonomous Growth Diagnosis</div>
+      <div style="color:#FFEAD5; font-size:1.02rem; margin-top:.35rem;">
+        Governed mix-vs-rate funnel diagnosis on real GA4 data — no LLM-written SQL, no in-prose math.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ---- sidebar: data source ----
 with st.sidebar:
-    st.header("⚙️ Data source")
+    st.header("Data source")
     project = st.text_input("GCP project", os.environ.get("HELIOS_PROJECT", "helios-mvp"))
     dataset = st.text_input("Marts dataset", os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
 
@@ -76,7 +107,7 @@ if len(weeks) < 2:
 auto0, auto1 = biggest_move(df)
 
 with st.sidebar:
-    st.header("📅 Compare weeks")
+    st.header("Compare weeks")
     use_auto = st.checkbox("Auto: biggest week-over-week move", value=True)
     if use_auto:
         w0, w1 = auto0, auto1
@@ -145,7 +176,7 @@ with right:
     )
 
 # ---- recommended action ----
-st.markdown("### ✅ Recommended action")
+st.markdown("### Recommended action")
 if not d.significant:
     st.write("Move is not statistically significant — **monitor**, do not act yet.")
 elif d.dominant == "mix":
@@ -158,7 +189,7 @@ else:
 
 # ---- grounded AI Decision Brief (v1) ----
 st.divider()
-st.markdown("### 🧠 AI Decision Brief")
+st.markdown("### AI Decision Brief")
 st.caption("An LLM (Gemini) writes the executive brief by **calling the governed tools** — "
            "it never writes SQL or computes a statistic. Every figure traces to a tool output.")
 
@@ -167,7 +198,7 @@ if not key:
     st.info("Set a **GEMINI_API_KEY** to enable the AI brief — a Streamlit *secret* on the "
             "cloud, or an env var locally. Get a free key at https://aistudio.google.com/apikey")
 else:
-    if st.button("✍️ Generate AI brief", type="primary"):
+    if st.button("Generate AI brief", type="primary"):
         with st.spinner("Gemini is calling governed tools and writing the brief…"):
             try:
                 from helios.llm.brief import generate_decision_brief
@@ -179,14 +210,14 @@ else:
     res = st.session_state.get("brief")
     if res:
         st.markdown(res.text)
-        with st.expander("🔎 Grounding — the governed tools the model called"):
+        with st.expander("Grounding — the governed tools the model called"):
             for c in res.tool_calls:
                 st.write(f"• `{c}`")
             st.caption(f"Model: {res.model}. No SQL authored by the LLM; no stat computed in prose.")
 
 # ---- honest benchmark: Helios vs naive baseline ----
 st.divider()
-st.markdown("### 📊 Benchmark — Helios vs a naive baseline")
+st.markdown("### Benchmark — Helios vs a naive baseline")
 st.caption("Honest offline eval: we inject **known** funnel anomalies (rate-changes and "
            "mix-shifts) into the real segment mix, then check which method recovers the true "
            "cause. The naive 'largest-segment-delta' baseline is structurally blind to "

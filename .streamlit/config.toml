@@ -1,0 +1,8 @@
+# Helios dashboard theme (committed — applies locally and on Streamlit Cloud).
+[theme]
+base = "light"
+primaryColor = "#EA580C"              # Helios amber/orange accent (buttons, charts, highlights)
+backgroundColor = "#FFFDFB"           # warm near-white page
+secondaryBackgroundColor = "#F6EEE6"  # sidebar + widget surfaces (soft sand)
+textColor = "#1F2430"                 # near-black, easy to read
+font = "sans serif"
