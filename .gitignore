@@ -24,6 +24,8 @@ dbt/logs/
 **/*-sa.json
 **/credentials*.json
 gcp-key*.json
+# Streamlit secrets (API keys) — local only, never commit:
+.streamlit/secrets.toml
 # (Helios uses ADC / Workload Identity Federation — keep key files out of git entirely.)
 
 # ── Eval run outputs (keep the dir, ignore contents) ──
