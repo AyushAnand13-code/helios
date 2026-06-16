@@ -183,6 +183,34 @@ The **CI eval gate** (`.github/workflows/ci.yml` + `eval/gates.yaml`) is the reg
 
 ## 10. Current status & next step
 
-**Built:** the full documentation suite — `docs/architecture/` (Bible, DATA_MODEL, DBT_GUIDE, MCP/AGENT architecture, metric governance + dependency graph), `docs/planning/` (DEPENDENCY_MAP, DEVELOPMENT_PLAN, IMPLEMENTATION_PLAYBOOK, LEAN_SCOPE), `docs/strategy/` (CLAUDE_CODE_WORKFLOW, INTERVIEW_GUIDE, RED_TEAM_REVIEW) — plus `models/semantic/semantic_layer.yaml` (47-metric registry) and `eval/scenarios/` (50-scenario benchmark). Repo restructured 2026-06-03 (see `MIGRATION_REPORT.md`). **No implementation code yet.**
+> Last refreshed 2026-06-16. A working **MVP is built and deployed** — the docs suite is no longer the only artifact.
 
-**Next (milestone M0 → M1):** repo scaffold + GCP/IAM/ADC + `dbt_project.yml`/`profiles.yml`/`packages.yml`, then the four macros (`channel_group_case` first), `src_ga4.yml`, and the seed. Front-load the keystones (sessionization, semantic registry) and start `stats-mcp.decompose_change` in parallel.
+### Architecture note — the MVP is *flattened*, not the full agent/MCP mesh (yet)
+The Bible specifies 5 MCP servers + 7 SDK agents. The shipped MVP collapses that into a single in-process Python package + a Streamlit app, holding the **five non-negotiable principles** (§3) by structure rather than by separate servers: governed marts (no hand SQL in the diagnosis path), deterministic math in real Python, every finding carrying significance + dollars + an action. **The top-level `mcp/`, `agents/`, `backend/`, `frontend/` dirs are still empty placeholders** — working code lives in `helios/` + root scripts + `app.py`.
+
+### Built & working (live)
+- **Data spine (dbt):** `models/staging → intermediate → marts` (`stg_ga4__events`/`event_params`, `int_ga4__sessionized`, `int_ga4__funnel_steps`, `fct_funnel`, `fct_daily_funnel`, `fct_orders`, `dim_channels`, `dim_date`) + the four macros (`channel_group`, `sessionize`, `get_event_param`) + seed. `dbt_project.yml`/`profiles.yml`/`packages.yml` present.
+- **Semantic registry:** `models/semantic/semantic_layer.yaml` (governance keystone).
+- **Math engine:** `helios/stats/decompose.py` (mix/rate/interaction — the centerpiece) + `significance.py` (two-proportion z-test). Golden-tested in `tests/test_decompose.py`.
+- **Diagnosis:** `helios/diagnosis.py` (shared by CLI + dashboard) → `diagnose.py` (templated Decision Brief, no LLM).
+- **Grounded LLM brief:** `helios/llm/tools.py` (`GovernedTools` — the LLM's only data path; logs every call) + `brief.py` (Gemini, provider-swappable) → `brief.py` CLI.
+- **Critic (verify-then-trust):** `helios/critic.py` — adversarial checks (additivity/reconcile, significance, mix-vs-rate framing, dollar sanity, data-quality) run on every `Diagnosis` before it ships; exposed to the LLM as a governed tool.
+- **Eval benchmark:** two harnesses. `helios/eval/` (injector + baseline) is the original 8-scenario BigQuery-backed runner (`eval_run.py`). `helios/eval/labeled.py` is the **offline 50-scenario firewall** over `eval/scenarios/scenarios.yaml` (all 7 buckets: rate/mix/multi/seasonality/control/data-quality) — no BigQuery, run via `eval_labeled.py`. Both pure-Python tested in `tests/`.
+- **Synthetic "live" data:** `helios/synth/generator.py` + `synth_run.py` load a rolling 90-day `fct_daily_funnel` into `helios_live` so the demo shows current weeks.
+- **Dashboard:** `app.py` (Streamlit, dark theme, week selector, "Generate AI Brief") — **live on Streamlit Cloud** (link in README).
+- **CI gate:** `.github/workflows/ci.yml` + `eval/gates.yaml` run pytest + the labeled eval and fail on accuracy regression or any hallucinated segment.
+
+### Not started (the full mesh, per the Bible)
+5 MCP servers · the 7-agent plan-execute-critique SDK orchestration · memory/`report-mcp` (`save_diagnosis`/`recall_prior`) · `experiment-mcp` (power/runtime/design) · the scheduled **autonomous run** (the product's heartbeat — currently the dashboard is the entry point).
+
+### Live commands (verified)
+```powershell
+python diagnose.py                  # templated brief from fct_daily_funnel (needs ADC + dbt build)
+python eval_labeled.py              # offline 50-scenario benchmark + CI gate check (no BigQuery)
+python eval_run.py                  # 8-scenario benchmark against real marts
+python synth_run.py                 # load synthetic helios_live data
+pytest tests/ -q                    # decompose golden + both eval harnesses + critic
+streamlit run app.py                # the dashboard
+```
+
+**Next:** promote the in-process tools to real MCP servers (start with `stats-mcp` wrapping `helios/stats` + `helios/critic`, then `semantic-mcp` over the registry), then stand up the scheduled autonomous run + memory so Helios is proactive (principle #5), not dashboard-triggered. Keep the labeled-eval gate green (≥85% top-1, 0 hallucinations) through every change.

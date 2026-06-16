@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from helios.diagnosis import weeks_in, biggest_move, run_diagnosis
+from helios.critic import critique
 
 
 def _r(x: float, n: int = 4) -> float:
@@ -49,7 +50,9 @@ class GovernedTools:
         significance test, dollars of revenue-at-risk, and the top driver segments. All
         numbers here are computed in real Python — treat them as authoritative."""
         d = run_diagnosis(self.df, week_baseline, week_compare)
-        self.calls.append(f"diagnose_conversion_change({week_baseline}, {week_compare})")
+        report = critique(d)
+        self.calls.append(f"diagnose_conversion_change({week_baseline}, {week_compare}) "
+                          f"-> critic: {report.verdict}")
         return {
             "week_baseline": d.w0,
             "week_compare": d.w1,
@@ -76,6 +79,10 @@ class GovernedTools:
                 }
                 for x in d.drivers[:5]
             ],
+            # Verify-then-trust: the Critic has already attacked this finding. Honour its
+            # verdict — if REFUTE, do not ship the finding as stated; if REVISE, attach the
+            # caveat. SHIP means it survived every adversarial check.
+            "critic": report.to_dict(),
         }
 
     def get_metric_definition(self, metric_name: str) -> dict:

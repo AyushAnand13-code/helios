@@ -1,0 +1,8 @@
+# Helios eval gate — the CI regression firewall (consumed by eval_labeled.py --gate and
+# .github/workflows/ci.yml). A change may not drop below these floors. Per the success
+# targets in CLAUDE.md section 4: root-cause accuracy >= 85% and ZERO hallucinated
+# metrics/segments (100% governed). Raise these as the engine improves; never lower them
+# to make a red build pass — fix the regression instead.
+min_accuracy: 0.85           # overall root-cause accuracy across all 50 labeled scenarios
+min_segment_accuracy: 0.85   # top-1 segment accuracy (scenarios that have a root cause)
+max_hallucinations: 0        # predicted segments must always be governed/known labels
