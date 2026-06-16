@@ -1,0 +1,31 @@
+name: CI
+
+# The regression firewall (CLAUDE.md section 8). Every push / PR to main runs the
+# deterministic unit tests and the offline 50-scenario eval gate. A change may not drop
+# root-cause accuracy below eval/gates.yaml or introduce a single hallucinated segment.
+# Pure-Python — no BigQuery, no secrets required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-eval-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal deps (no BigQuery / Streamlit needed for the gate)
+        run: pip install scipy pyyaml pytest
+
+      - name: Unit tests (decompose goldens, critic, both eval harnesses)
+        run: python -m pytest tests/test_decompose.py tests/test_critic.py tests/test_eval.py tests/test_labeled_eval.py -q
+
+      - name: Eval gate — 50 labeled scenarios, >=85% accuracy, 0 hallucinations
+        run: python eval_labeled.py --gate
