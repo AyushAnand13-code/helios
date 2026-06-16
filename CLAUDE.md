@@ -200,6 +200,7 @@ The Bible specifies 5 MCP servers + 7 SDK agents. The shipped MVP collapses that
 - **Dashboard:** `app.py` (Streamlit, dark theme, week selector, "Generate AI Brief") — **live on Streamlit Cloud** (link in README).
 - **CI gate:** `.github/workflows/ci.yml` + `eval/gates.yaml` run pytest + the labeled eval and fail on accuracy regression or any hallucinated segment. `main` is branch-protected on the `test-and-eval-gate` check.
 - **stats-mcp (the first real MCP server):** `helios/mcp/stats.py` — a stdio FastMCP wrapper exposing `decompose_change`, `significance_test`, `critique_decomposition` over MCP (`python -m helios.mcp.stats`). Declared in `mcp_servers.yaml`; Claude Code launches it via `.mcp.json`. This closes the one technical artifact LEAN_SCOPE requires for **v1** (one governed MCP server + MCP client). Tested in `tests/test_mcp_stats.py`.
+- **Autonomous run (the heartbeat — v2 P0):** `helios/run.py` (`python -m helios.run`) does headless load → diagnose → critic → dated Markdown brief (`helios/report/brief_md.py`), with a `synthetic`|`bigquery` source switch. Scheduled daily by `.github/workflows/daily-brief.yml` (synthetic source, uploads the brief as an artifact; optional Slack via `HELIOS_SLACK_WEBHOOK`). This is the first step turning Helios from reactive (dashboard) to **proactive** (principle #5). Tested in `tests/test_run.py`.
 
 ### Not started (the full mesh, per the Bible)
 The other 4 MCP servers (semantic/warehouse/experiment/report) · the 7-agent plan-execute-critique SDK orchestration · memory/`report-mcp` (`save_diagnosis`/`recall_prior`) · `experiment-mcp` (power/runtime/design) · the scheduled **autonomous run** (the product's heartbeat — currently the dashboard is the entry point). These are the **v2** scope per `docs/planning/LEAN_SCOPE.md`.
@@ -210,9 +211,10 @@ python diagnose.py                  # templated brief from fct_daily_funnel (nee
 python eval_labeled.py              # offline 50-scenario benchmark + CI gate check (no BigQuery)
 python eval_run.py                  # 8-scenario benchmark against real marts
 python synth_run.py                 # load synthetic helios_live data
+python -m helios.run                # autonomous run: dated Decision Brief (synthetic source; --source bigquery for marts)
 python -m helios.mcp.stats          # stats-mcp stdio server (Claude Code auto-launches via .mcp.json)
 pytest tests/ -q                    # decompose golden + both eval harnesses + critic + stats-mcp
 streamlit run app.py                # the dashboard
 ```
 
-**Next (v2):** the remaining MCP servers (`semantic-mcp` over the registry, then `warehouse-mcp`), then stand up the scheduled autonomous run + memory so Helios is proactive (principle #5), not dashboard-triggered. Keep the labeled-eval gate green (≥85% top-1, 0 hallucinations) through every change.
+**Next (v2):** P0 (the autonomous heartbeat) has landed — `helios/run.py` + the daily workflow. Remaining, in priority order: **P1** true grounding (`semantic-mcp` over the registry + `warehouse-mcp`, replacing the hand-authored `WEEKLY_SQL` so G1 is literally true), **P2** memory (`report-mcp` save/recall + suppression + seasonality calendar so the heartbeat isn't spammy), then experiment-mcp and the full 7-agent loop. Keep the labeled-eval gate green (≥85% top-1, 0 hallucinations) through every change.

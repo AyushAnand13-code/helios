@@ -1,0 +1,41 @@
+name: Daily Decision Brief
+
+# The autonomous heartbeat (principle #5): a scheduled run that produces a dated Helios
+# Decision Brief without anyone clicking. Defaults to the synthetic data source so it runs
+# anywhere with no credentials; the brief is uploaded as a workflow artifact.
+#
+# To run against the real governed marts instead, set repo secrets and swap the run step:
+#   - add GCP_SA_KEY (read-only BigQuery SA JSON) and authenticate (google-github-actions/auth)
+#   - pip install google-cloud-bigquery
+#   - python -m helios.run --source bigquery --project <id> --dataset helios_dev
+# To fan the headline out to Slack, add a HELIOS_SLACK_WEBHOOK secret and pass it as env.
+
+on:
+  schedule:
+    - cron: "0 13 * * *"   # daily at 13:00 UTC
+  workflow_dispatch: {}     # allow manual runs
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (synthetic source — no BigQuery needed)
+        run: pip install pandas scipy pyyaml
+
+      - name: Generate the Decision Brief
+        env:
+          HELIOS_SLACK_WEBHOOK: ${{ secrets.HELIOS_SLACK_WEBHOOK }}
+        run: python -m helios.run --source synthetic --out-dir briefs
+
+      - name: Upload the brief
+        uses: actions/upload-artifact@v4
+        with:
+          name: decision-brief
+          path: briefs/
+          if-no-files-found: error
