@@ -127,6 +127,7 @@ def run_diagnosis(df, w0: str, w1: str) -> Diagnosis:
         "rate_pts": c.rate * 100,
         "conv_t0_pct": c.r_t0 * 100,
         "conv_t1_pct": c.r_t1 * 100,
+        "sessions_t1": int(round(c.w_t1 * sess_t1)),   # this cell's compare-week traffic
     } for c in res.segments[:8]]
 
     funnel_t0 = {lbl: int(t0[col].sum()) for col, lbl in FUNNEL_STEPS}

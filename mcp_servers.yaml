@@ -4,10 +4,9 @@
 #   stats-mcp     — the only path to math (helios.stats + helios.critic).
 #   semantic-mcp  — the only path to SQL (helios.semantic over the registry below).
 #   warehouse-mcp — the sole BigQuery client (helios.warehouse): dry_run/run_query/reconcile.
-#   report-mcp    — diagnosis memory (helios.memory): save_diagnosis/recall_prior + suppression.
-#   All stdio wrappers; Claude Code launches them via .mcp.json.
-#
-# PLANNED: experiment-mcp.
+#   report-mcp     — diagnosis memory (helios.memory): save_diagnosis/recall_prior + suppression.
+#   experiment-mcp — powered experiment design (helios.experiment): power/runtime/design.
+#   All stdio wrappers; Claude Code launches them via .mcp.json. (All 5 servers live.)
 registry: semantic/semantic_layer.yaml
 servers:
   stats-mcp:
@@ -43,3 +42,11 @@ servers:
       Diagnosis memory: save_diagnosis/recall_prior + check_suppression (seasonal /
       repeat / refuted / immaterial) so the autonomous run alerts only on NEW findings.
     tools: [save_diagnosis, recall_prior, check_suppression]
+  experiment-mcp:
+    transport: stdio
+    command: python
+    args: ["-m", "helios.mcp.experiment"]
+    description: >-
+      Powered experiment design: power_analysis (sample size), runtime_estimate, and
+      design_experiment (full sized spec) so every rate finding ships an A/B test.
+    tools: [power_analysis, runtime_estimate, design_experiment]

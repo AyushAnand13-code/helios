@@ -19,6 +19,11 @@
       "command": ".venv/Scripts/python.exe",
       "args": ["-m", "helios.mcp.report"],
       "env": {}
+    },
+    "experiment-mcp": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "helios.mcp.experiment"],
+      "env": {}
     }
   }
 }
