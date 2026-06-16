@@ -1,5 +1,10 @@
 # Helios — Project Structure & Manifest
 
+> 🧭 **New here / want to understand & defend the project? → [`docs/onboarding/`](docs/onboarding/README.md)**
+> Plain-English, ground-up explainers (no dbt/BigQuery/MCP background assumed): what Helios is,
+> the core mix-vs-rate idea, the data, the architecture, a dashboard walkthrough, a glossary, and
+> an interview playbook.
+
 > 🚀 **Live demo → https://helios-5be8rdzgr7vprmfhxqsj4k.streamlit.app/**
 > An interactive growth-diagnosis dashboard on real GA4 data: it finds the biggest
 > week-over-week conversion move, separates **mix-shift from rate-change**, tests
