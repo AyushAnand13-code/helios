@@ -1,8 +1,14 @@
 """Generate a realistic, recent-dated fct_daily_funnel (synthetic 'live' data).
 
 Shapes mimic GA4 e-commerce: 10 channel groups x 3 devices x new/returning, weekly
-seasonality + mild growth + daily noise, a monotonic funnel, and a planted conversion
-anomaly in the most recent ~10 days so the diagnosis surfaces a fresh, dated finding.
+seasonality + mild growth + daily noise, a monotonic funnel, and a planted INCIDENT in
+the most recent week so the diagnosis surfaces a fresh, dated, actionable finding.
+
+The incident is a mobile checkout regression: in-segment conversion on `mobile` drops
+~38% across channels over the last 7 days. Because mobile is ~58% of traffic this moves
+the AGGREGATE weekly conversion by a material, statistically-significant amount — a
+genuine 'rate' anomaly concentrated in the mobile cells, not a tiny segment blip. That is
+what makes the autonomous run alert on a NEW finding rather than shrug it off as noise.
 Deterministic per (end_date, seed) so a given day's run is reproducible.
 """
 from __future__ import annotations
@@ -23,8 +29,10 @@ _CH_W = sum(c[1] for c in CHANNELS)
 # (device, traffic share, conversion multiplier)
 DEVICES = [("mobile", 0.58, 0.85), ("desktop", 0.36, 1.30), ("tablet", 0.06, 0.95)]
 
-# planted recent anomaly: a conversion-rate drop in one segment over the last N days
-ANOM_CHANNEL, ANOM_DEVICE, ANOM_DAYS, ANOM_FACTOR = "Referral", "desktop", 10, 0.5
+# planted recent incident: a mobile checkout regression (in-segment conversion drop on
+# `mobile` across all channels) over the last N days. Mobile's large traffic share makes
+# this aggregate-material and significant -> the autonomous run flags a NEW finding.
+ANOM_DEVICE, ANOM_DAYS, ANOM_FACTOR = "mobile", 7, 0.62   # ~38% mobile conversion drop
 
 _DAILY_SESSIONS = 14000   # total sessions/day baseline
 
@@ -66,8 +74,8 @@ def generate_daily_funnel(end_date: date, days: int = 90, seed: int | None = Non
                     payment = int(round(shipping * rng.uniform(0.80, 0.92)))
 
                     conv_factor = dev_mult * (0.8 if is_new else 1.25)
-                    if (ch_name == ANOM_CHANNEL and dev_name == ANOM_DEVICE and d >= anom_start):
-                        conv_factor *= ANOM_FACTOR
+                    if (dev_name == ANOM_DEVICE and d >= anom_start):
+                        conv_factor *= ANOM_FACTOR    # mobile checkout regression, last 7 days
                     # implied final-step rate to hit ~ ch_conv * conv_factor overall
                     target_purch = sessions * min(0.45, max(0.0006, ch_conv * conv_factor
                                                             * (1.0 + rng.uniform(-0.08, 0.08))))
