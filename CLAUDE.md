@@ -134,12 +134,12 @@ dbt build --select staging     # one layer
 dbt test --select fct_funnel    # one model's tests
 dbt build --select +fct_daily_funnel   # model + upstream
 
-# MCP servers (once M6 exists) — stdio servers
-python -m helios.mcp.semantic
-python -m helios.mcp.stats
-python -m helios.mcp.experiment
-python -m helios.mcp.report
-python -m helios.mcp.warehouse   # streamable-http
+# MCP servers — stdio servers
+python -m helios.mcp.stats       # LIVE — decompose_change / significance_test / critique_decomposition
+python -m helios.mcp.semantic    # (planned, M6)
+python -m helios.mcp.experiment  # (planned)
+python -m helios.mcp.report      # (planned)
+python -m helios.mcp.warehouse   # (planned) streamable-http
 
 # Eval harness (once M10 exists)
 python -m helios.eval.runner --smoke    # 12-scenario subset (every push)
@@ -198,10 +198,11 @@ The Bible specifies 5 MCP servers + 7 SDK agents. The shipped MVP collapses that
 - **Eval benchmark:** two harnesses. `helios/eval/` (injector + baseline) is the original 8-scenario BigQuery-backed runner (`eval_run.py`). `helios/eval/labeled.py` is the **offline 50-scenario firewall** over `eval/scenarios/scenarios.yaml` (all 7 buckets: rate/mix/multi/seasonality/control/data-quality) — no BigQuery, run via `eval_labeled.py`. Both pure-Python tested in `tests/`.
 - **Synthetic "live" data:** `helios/synth/generator.py` + `synth_run.py` load a rolling 90-day `fct_daily_funnel` into `helios_live` so the demo shows current weeks.
 - **Dashboard:** `app.py` (Streamlit, dark theme, week selector, "Generate AI Brief") — **live on Streamlit Cloud** (link in README).
-- **CI gate:** `.github/workflows/ci.yml` + `eval/gates.yaml` run pytest + the labeled eval and fail on accuracy regression or any hallucinated segment.
+- **CI gate:** `.github/workflows/ci.yml` + `eval/gates.yaml` run pytest + the labeled eval and fail on accuracy regression or any hallucinated segment. `main` is branch-protected on the `test-and-eval-gate` check.
+- **stats-mcp (the first real MCP server):** `helios/mcp/stats.py` — a stdio FastMCP wrapper exposing `decompose_change`, `significance_test`, `critique_decomposition` over MCP (`python -m helios.mcp.stats`). Declared in `mcp_servers.yaml`; Claude Code launches it via `.mcp.json`. This closes the one technical artifact LEAN_SCOPE requires for **v1** (one governed MCP server + MCP client). Tested in `tests/test_mcp_stats.py`.
 
 ### Not started (the full mesh, per the Bible)
-5 MCP servers · the 7-agent plan-execute-critique SDK orchestration · memory/`report-mcp` (`save_diagnosis`/`recall_prior`) · `experiment-mcp` (power/runtime/design) · the scheduled **autonomous run** (the product's heartbeat — currently the dashboard is the entry point).
+The other 4 MCP servers (semantic/warehouse/experiment/report) · the 7-agent plan-execute-critique SDK orchestration · memory/`report-mcp` (`save_diagnosis`/`recall_prior`) · `experiment-mcp` (power/runtime/design) · the scheduled **autonomous run** (the product's heartbeat — currently the dashboard is the entry point). These are the **v2** scope per `docs/planning/LEAN_SCOPE.md`.
 
 ### Live commands (verified)
 ```powershell
@@ -209,8 +210,9 @@ python diagnose.py                  # templated brief from fct_daily_funnel (nee
 python eval_labeled.py              # offline 50-scenario benchmark + CI gate check (no BigQuery)
 python eval_run.py                  # 8-scenario benchmark against real marts
 python synth_run.py                 # load synthetic helios_live data
-pytest tests/ -q                    # decompose golden + both eval harnesses + critic
+python -m helios.mcp.stats          # stats-mcp stdio server (Claude Code auto-launches via .mcp.json)
+pytest tests/ -q                    # decompose golden + both eval harnesses + critic + stats-mcp
 streamlit run app.py                # the dashboard
 ```
 
-**Next:** promote the in-process tools to real MCP servers (start with `stats-mcp` wrapping `helios/stats` + `helios/critic`, then `semantic-mcp` over the registry), then stand up the scheduled autonomous run + memory so Helios is proactive (principle #5), not dashboard-triggered. Keep the labeled-eval gate green (≥85% top-1, 0 hallucinations) through every change.
+**Next (v2):** the remaining MCP servers (`semantic-mcp` over the registry, then `warehouse-mcp`), then stand up the scheduled autonomous run + memory so Helios is proactive (principle #5), not dashboard-triggered. Keep the labeled-eval gate green (≥85% top-1, 0 hallucinations) through every change.

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "stats-mcp": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "helios.mcp.stats"],
+      "env": {}
+    }
+  }
+}
