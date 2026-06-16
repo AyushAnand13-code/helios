@@ -94,7 +94,8 @@ def generate(*, source: str = "synthetic", project: str | None = None,
              dataset: str = "helios_dev_marts", days: int = 90,
              as_of: str | None = None, out_dir: str | Path = "briefs",
              end_date: date | None = None,
-             memory: MemoryStore | None = None) -> RunResult:
+             memory: MemoryStore | None = None,
+             orchestrated: bool = False) -> RunResult:
     """Run the full diagnosis -> critic -> brief pipeline and write a dated Markdown brief.
     If a MemoryStore is given, consult it (+ the seasonality calendar) to decide whether
     the finding is NEW (alert + remember) or should be suppressed (SEASONAL / REFUTED /
@@ -116,6 +117,22 @@ def generate(*, source: str = "synthetic", project: str | None = None,
         note = "Not enough data: need at least two weeks to compare. No brief written."
         return RunResult(as_of, source_label, None, None, f"# Helios — {as_of}\n\n{note}\n",
                          None, note, status="NO_DATA", suppress_reason=note)
+
+    # Orchestrated mode: drive the finding through the 7-agent plan-execute-critique loop
+    # (allow-lists enforced, Critic gates) instead of the flat pipeline. Same brief, plus
+    # an agent-run trace appended.
+    if orchestrated:
+        from helios.agents import orchestrate
+        res = orchestrate(df, as_of=as_of, source_label=source_label, store=memory)
+        md = res.markdown + "\n\n## Agent run (plan-execute-critique)\n" \
+            + f"_Gate: **{res.gate}**_\n\n" \
+            + "\n".join(f"{i+1}. {step}" for i, step in enumerate(res.plan)) \
+            + f"\n\n_Tool trace (allow-list enforced):_ `{res.trace_str()}`\n"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{as_of}_decision_brief.md"
+        path.write_text(md, encoding="utf-8")
+        return RunResult(as_of, source_label, res.diagnosis, res.report, md, path,
+                         status=res.status, suppress_reason=res.suppress_reason)
 
     w0, w1 = biggest_move(df)
     d = run_diagnosis(df, w0, w1)
@@ -165,13 +182,15 @@ def main() -> int:
     ap.add_argument("--memory", default=os.environ.get("HELIOS_MEMORY_PATH",
                     "memory/diagnoses.jsonl"), help="memory store path (suppress repeats/seasonal)")
     ap.add_argument("--no-memory", action="store_true", help="disable memory (stateless run)")
+    ap.add_argument("--orchestrated", action="store_true",
+                    help="run the 7-agent plan-execute-critique loop (allow-lists enforced)")
     args = ap.parse_args()
 
     end = (datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else date.today())
     memory = None if args.no_memory else MemoryStore(args.memory)
     r = generate(source=args.source, project=args.project, dataset=args.dataset,
                  days=args.days, as_of=args.date, out_dir=args.out_dir, end_date=end,
-                 memory=memory)
+                 memory=memory, orchestrated=args.orchestrated)
 
     print(_summary_line(r))
     if r.path:

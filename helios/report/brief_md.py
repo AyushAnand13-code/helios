@@ -9,6 +9,30 @@ from __future__ import annotations
 from helios.experiment import design_experiment
 
 
+def recommended_experiment(d):
+    """The powered A/B test for a rate finding, sized on the regressed POPULATION (driver
+    cells sharing the top driver's device — labels are 'channel / device') at a realistic
+    +10% MDE. Returns an ExperimentDesign, or None if it can't be sized. Shared by the
+    brief renderer and the Prescribe agent so they never diverge."""
+    if not d.drivers:
+        return None
+    top = d.drivers[0]
+    device = top["segment"].split(" / ")[-1]
+    pool = [c for c in d.drivers if c["segment"].split(" / ")[-1] == device
+            and c.get("sessions_t1", 0) > 0]
+    elig = sum(c["sessions_t1"] for c in pool)
+    if elig <= 0:
+        return None
+    baseline = sum((c["conv_t1_pct"] / 100.0) * c["sessions_t1"] for c in pool) / elig
+    label = device if len(pool) > 1 else top["segment"]
+    try:
+        return design_experiment(primary_metric="session_conversion_rate", segment=label,
+                                 baseline_rate=baseline, daily_eligible_sessions=elig / 7.0,
+                                 mde_rel=0.10)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def _pct(x: float, dp: int = 2) -> str:
     return f"{x * 100:.{dp}f}%"
 
@@ -27,24 +51,8 @@ def _experiment_section(d, report) -> list[str]:
     acquisition/data issues, not funnel experiments."""
     if report.verdict == "REFUTE" or d.dominant != "rate" or not d.drivers:
         return []
-    # Size on the regressed POPULATION, not a single thin cell: pool the driver cells that
-    # share the top driver's device (labels are 'channel / device'), so the test runs on
-    # realistic traffic. Baseline is the traffic-weighted compare-week conversion.
-    top = d.drivers[0]
-    device = top["segment"].split(" / ")[-1]
-    pool = [c for c in d.drivers if c["segment"].split(" / ")[-1] == device
-            and c.get("sessions_t1", 0) > 0]
-    elig = sum(c["sessions_t1"] for c in pool)
-    if elig <= 0:
-        return []
-    baseline = sum((c["conv_t1_pct"] / 100.0) * c["sessions_t1"] for c in pool) / elig
-    label = device if len(pool) > 1 else top["segment"]
-    try:
-        # +10% relative is a realistic target for recovering a funnel regression.
-        exp = design_experiment(primary_metric="session_conversion_rate", segment=label,
-                                baseline_rate=baseline, daily_eligible_sessions=elig / 7.0,
-                                mde_rel=0.10)
-    except (ValueError, ZeroDivisionError):
+    exp = recommended_experiment(d)
+    if exp is None:
         return []
     runtime = (f"~{exp.runtime_days} days (~{exp.runtime_weeks} wks)"
                if exp.runtime_days is not None else "n/a (insufficient traffic)")
