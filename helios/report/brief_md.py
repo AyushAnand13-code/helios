@@ -6,6 +6,8 @@ engine / Critic; this module only formats them. Shared by the scheduled autonomo
 """
 from __future__ import annotations
 
+from helios.experiment import design_experiment
+
 
 def _pct(x: float, dp: int = 2) -> str:
     return f"{x * 100:.{dp}f}%"
@@ -17,6 +19,48 @@ def _pts(x: float, dp: int = 3) -> str:
 
 def _money(x: float) -> str:
     return f"${x:,.0f}"
+
+
+def _experiment_section(d, report) -> list[str]:
+    """A powered, sized A/B test for a genuine rate finding (principle #4). Only for
+    rate-dominant findings the Critic didn't refute; mix/seasonal/refuted findings are
+    acquisition/data issues, not funnel experiments."""
+    if report.verdict == "REFUTE" or d.dominant != "rate" or not d.drivers:
+        return []
+    # Size on the regressed POPULATION, not a single thin cell: pool the driver cells that
+    # share the top driver's device (labels are 'channel / device'), so the test runs on
+    # realistic traffic. Baseline is the traffic-weighted compare-week conversion.
+    top = d.drivers[0]
+    device = top["segment"].split(" / ")[-1]
+    pool = [c for c in d.drivers if c["segment"].split(" / ")[-1] == device
+            and c.get("sessions_t1", 0) > 0]
+    elig = sum(c["sessions_t1"] for c in pool)
+    if elig <= 0:
+        return []
+    baseline = sum((c["conv_t1_pct"] / 100.0) * c["sessions_t1"] for c in pool) / elig
+    label = device if len(pool) > 1 else top["segment"]
+    try:
+        # +10% relative is a realistic target for recovering a funnel regression.
+        exp = design_experiment(primary_metric="session_conversion_rate", segment=label,
+                                baseline_rate=baseline, daily_eligible_sessions=elig / 7.0,
+                                mde_rel=0.10)
+    except (ValueError, ZeroDivisionError):
+        return []
+    runtime = (f"~{exp.runtime_days} days (~{exp.runtime_weeks} wks)"
+               if exp.runtime_days is not None else "n/a (insufficient traffic)")
+    feas = "feasible" if exp.feasible else "SLOW — widen the segment or raise the MDE"
+    return [
+        "",
+        "## Recommended experiment (powered)",
+        f"- **Hypothesis:** {exp.hypothesis}",
+        f"- **Primary metric:** `{exp.primary_metric}` · **guardrails:** "
+        + ", ".join(f"`{g}`" for g in exp.guardrails),
+        f"- **Design:** {exp.arms}-arm {exp.split} split · detect +{exp.mde_rel*100:.0f}% "
+        f"at alpha={exp.alpha}, power={exp.power:.0%}",
+        f"- **Sample size:** {exp.n_per_arm:,}/arm ({exp.total_n:,} total) · "
+        f"~{exp.daily_eligible_sessions:,.0f} eligible sessions/day",
+        f"- **Runtime:** {runtime} — {feas}",
+    ]
 
 
 def _action(d, report) -> str:
@@ -92,6 +136,9 @@ def render_brief_md(d, report, *, as_of: str, source_label: str,
         "",
         "## Recommended action",
         _action(d, report),
+    ]
+    lines += _experiment_section(d, report)
+    lines += [
         "",
         "## Critic review (verify-then-trust)",
         f"Verdict: **{report.verdict}**",
