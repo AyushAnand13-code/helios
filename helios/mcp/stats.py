@@ -25,6 +25,8 @@ except ImportError as e:  # pragma: no cover - only hit without the SDK installe
 
 from helios.stats import decompose_change as _decompose
 from helios.stats import two_proportion_ztest as _ztest
+from helios.stats import detect_anomaly as _detect_anomaly
+from helios.stats import forecast_next as _forecast_next
 
 mcp = FastMCP("stats-mcp")
 
@@ -123,6 +125,31 @@ def critique_decomposition(segments: list[Segment], alpha: float = 0.05) -> dict
         "p_value": sig.p_value,
         "checks": report.to_dict()["checks"],
     }
+
+
+@mcp.tool()
+def detect_anomaly(values: list[float], k: int = 4, z_threshold: float = 2.5) -> dict:
+    """Forecast-based anomaly detection on a metric time series (oldest -> newest). Each
+    point is scored against a rolling forecast of its recent history; points with
+    |z| > z_threshold are anomalies. Use this instead of eyeballing 'the biggest move' — it
+    ignores low-volume weeks whose RATE is normal. Returns per-point forecasts/z and the
+    flagged anomaly indices."""
+    pts = _detect_anomaly(values, k=k, z_threshold=z_threshold)
+    return {
+        "anomalies": [p.index for p in pts if p.is_anomaly],
+        "points": [{"index": p.index, "value": p.value, "forecast": p.forecast,
+                    "z": p.z, "is_anomaly": p.is_anomaly} for p in pts],
+    }
+
+
+@mcp.tool()
+def forecast(values: list[float], k: int = 4, conf: float = 0.95) -> dict:
+    """Point forecast + prediction interval for the NEXT value of a metric series. A new
+    actual outside [lower, upper] is anomalous at the given confidence."""
+    try:
+        return _forecast_next(values, k=k, conf=conf)
+    except ValueError as e:
+        return {"error": str(e)}
 
 
 def main() -> None:

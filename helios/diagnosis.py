@@ -72,6 +72,29 @@ def biggest_move(df) -> tuple[str, str]:
     return best[1], best[2]
 
 
+def most_anomalous_move(df) -> tuple[str, str]:
+    """Pick the week to diagnose by FORECAST-based anomaly detection on the conversion-rate
+    series, not the biggest raw delta. Returns (baseline_week, anomalous_week): the week
+    whose rate deviates most from its rolling forecast, vs the week before it. Falls back to
+    biggest_move when nothing is anomalous. Robust to partial boundary weeks (normal rate,
+    low volume -> not flagged)."""
+    from .stats import detect_anomaly
+
+    g = df.groupby("week").agg(sessions=("sessions", "sum"),
+                               purch=("purchasing_sessions", "sum"))
+    g["conv"] = g["purch"] / g["sessions"].where(g["sessions"] != 0)
+    weeks = list(g.index)
+    if len(weeks) < 2:
+        return biggest_move(df)
+    series = [float(g.loc[w, "conv"] or 0.0) for w in weeks]
+    anomalies = [p for p in detect_anomaly(series) if p.is_anomaly]
+    if not anomalies:
+        return biggest_move(df)
+    worst = max(anomalies, key=lambda p: abs(p.z))
+    t = worst.index
+    return weeks[t - 1], weeks[t]
+
+
 @dataclass
 class Diagnosis:
     w0: str

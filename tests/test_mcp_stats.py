@@ -20,7 +20,8 @@ SEGS = [
 
 def test_tools_are_registered():
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    assert names == {"decompose_change", "significance_test", "critique_decomposition"}
+    assert names == {"decompose_change", "significance_test", "critique_decomposition",
+                     "detect_anomaly", "forecast"}
 
 
 def test_decompose_matches_engine_and_golden():
