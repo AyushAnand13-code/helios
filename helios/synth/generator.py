@@ -105,3 +105,58 @@ def generate_daily_funnel(end_date: date, days: int = 90, seed: int | None = Non
                         "revenue": round(purchase * aov, 2),
                     })
     return rows
+
+
+# Session-grain funnel columns the governed query (build_query over fct_funnel) needs.
+_REACHED = ["reached_view_item", "reached_add_to_cart", "reached_begin_checkout",
+            "reached_add_shipping_info", "reached_add_payment_info", "reached_purchase"]
+_DAILY_TO_STEP = {
+    "reached_view_item": "view_item_sessions",
+    "reached_add_to_cart": "add_to_cart_sessions",
+    "reached_begin_checkout": "begin_checkout_sessions",
+    "reached_add_shipping_info": "add_shipping_info_sessions",
+    "reached_add_payment_info": "add_payment_info_sessions",
+    "reached_purchase": "purchasing_sessions",
+}
+
+
+def generate_funnel_sessions(end_date: date, days: int = 90, scale: float = 0.12,
+                             seed: int | None = None) -> list[dict]:
+    """Expand the daily aggregates into SESSION-grain `fct_funnel` rows — the table the
+    governed diagnosis actually reads (sessions = COUNT(DISTINCT session_key),
+    COUNTIF(reached_*), SUM(session_revenue)). One row per session, with monotonic
+    reached_* flags, so it aggregates back to the same funnel and conversion rates.
+
+    `scale` downsamples session volume (rates are preserved) to keep the load light; at
+    the default ~0.12 a 90-day run is ~150k rows. Deterministic per (end_date, seed).
+    """
+    daily = generate_daily_funnel(end_date, days=days, seed=seed)
+    rows: list[dict] = []
+    for r in daily:
+        n = int(round(r["sessions"] * scale))
+        if n <= 0:
+            continue
+        # scaled, monotonically-clamped step counts
+        steps, prev = {}, n
+        for flag in _REACHED:
+            c = min(prev, int(round(r[_DAILY_TO_STEP[flag]] * scale)))
+            steps[flag] = c
+            prev = c
+        n_purch = steps["reached_purchase"]
+        rev_per_purchaser = (r["revenue"] / r["purchasing_sessions"]
+                             if r["purchasing_sessions"] else 0.0)
+        for i in range(n):
+            row = {
+                "session_key": _key(r["event_date"], r["channel_group"],
+                                    r["device_category"], r["is_new_user"], i),
+                "event_date": r["event_date"],
+                "channel_group": r["channel_group"],
+                "device_category": r["device_category"],
+                "country": r["country"],
+                "is_new_user": r["is_new_user"],
+                "session_revenue": round(rev_per_purchaser, 2) if i < n_purch else 0.0,
+            }
+            for flag in _REACHED:
+                row[flag] = i < steps[flag]   # monotonic: steps are non-increasing
+            rows.append(row)
+    return rows
