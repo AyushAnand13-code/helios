@@ -1,12 +1,12 @@
 # Helios MCP server registry.
 #
 # LIVE:
-#   stats-mcp    — the only path to math (helios.stats + helios.critic).
-#   semantic-mcp — the only path to SQL (helios.semantic over the registry below).
-#   Both are stdio wrappers; Claude Code launches them via .mcp.json.
+#   stats-mcp     — the only path to math (helios.stats + helios.critic).
+#   semantic-mcp  — the only path to SQL (helios.semantic over the registry below).
+#   warehouse-mcp — the sole BigQuery client (helios.warehouse): dry_run/run_query/reconcile.
+#   All three are stdio wrappers; Claude Code launches them via .mcp.json.
 #
-# PLANNED (P1b+): warehouse-mcp (BigQuery client: dry_run/run_query/reconcile),
-#   then experiment-mcp and report-mcp.
+# PLANNED: experiment-mcp and report-mcp.
 registry: models/semantic/semantic_layer.yaml
 servers:
   stats-mcp:
@@ -26,3 +26,11 @@ servers:
       Governed SQL composition from the registry. Never hand-authors SQL (G1); unknown
       names are hard errors (G5).
     tools: [build_query, get_metric, list_metrics, list_dimensions]
+  warehouse-mcp:
+    transport: stdio
+    command: python
+    args: ["-m", "helios.mcp.warehouse"]
+    description: >-
+      Sole BigQuery client. dry_run cost-checks before run_query against a 5 GiB budget
+      (G3); reconcile checks aggregates against canonical totals within 0.5% (G4).
+    tools: [dry_run, run_query, reconcile]

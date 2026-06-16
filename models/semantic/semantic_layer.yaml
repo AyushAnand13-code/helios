@@ -1706,6 +1706,83 @@ metrics:
     reconciliation_checks:
     - semantic vs fct_daily_funnel additive recompute of COUNTIF(reached_begin_checkout) within 0.5%
   freshness_requirements: daily; available <=36h after event_date
+- metric_name: add_shipping_info_sessions
+  label: Add Shipping Info
+  category: funnel
+  type: count
+  business_definition: 'Number of sessions that reached the add_shipping_info step. Monotonic: includes
+    every session that also reached add_payment_info or purchase. Sits between begin_checkout and
+    add_payment_info in the macro funnel.'
+  sql_definition: COUNTIF(reached_add_shipping_info)
+  aggregation_method: countif
+  grain: fct_funnel
+  entity: session
+  numerator: null
+  denominator: null
+  expr: null
+  dimensions_supported:
+  - device_category
+  - operating_system
+  - browser
+  - country
+  - region
+  - channel_group
+  - source
+  - medium
+  - campaign
+  - landing_page
+  - is_new_user
+  - session_number_bucket
+  - day
+  - week
+  - month
+  - quarter
+  owner: analytics-eng
+  version: 1.0.0
+  caveats:
+  - 'Session-grain: counts sessions reaching the shipping-info step, not shipping submissions.'
+  - 'Monotonic inclusion: contains all add_payment_info and purchasing sessions.'
+  common_mistakes:
+  - Treating begin_checkout_sessions minus add_shipping_info_sessions as a precise drop-off without
+    accounting for express/one-page checkouts that skip a discrete shipping step.
+- metric_name: add_payment_info_sessions
+  label: Add Payment Info
+  category: funnel
+  type: count
+  business_definition: 'Number of sessions that reached the add_payment_info step. Monotonic: includes
+    every session that also reached purchase. The last instrumented step before purchase.'
+  sql_definition: COUNTIF(reached_add_payment_info)
+  aggregation_method: countif
+  grain: fct_funnel
+  entity: session
+  numerator: null
+  denominator: null
+  expr: null
+  dimensions_supported:
+  - device_category
+  - operating_system
+  - browser
+  - country
+  - region
+  - channel_group
+  - source
+  - medium
+  - campaign
+  - landing_page
+  - is_new_user
+  - session_number_bucket
+  - day
+  - week
+  - month
+  - quarter
+  owner: analytics-eng
+  version: 1.0.0
+  caveats:
+  - 'Session-grain: counts sessions reaching the payment-info step, not payment attempts.'
+  - 'Monotonic inclusion: contains all purchasing sessions.'
+  common_mistakes:
+  - Reading add_payment_info_sessions minus purchasing_sessions as 'payment failures' without accounting
+    for users who abandon at the final review step for non-technical reasons.
 - metric_name: purchasing_sessions
   label: Purchases
   category: funnel

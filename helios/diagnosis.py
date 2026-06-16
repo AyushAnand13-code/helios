@@ -1,15 +1,18 @@
 """Reusable Helios diagnosis logic — shared by diagnose.py (CLI) and app.py (dashboard).
 
-Pulls weekly funnel data from fct_daily_funnel and turns a week-over-week conversion
+Pulls weekly funnel data through the GOVERNED path (semantic-mcp composes the SQL from
+the registry; warehouse dry-run-checks and runs it) and turns a week-over-week conversion
 move into a structured diagnosis (mix vs rate, significance, dollar impact, drivers).
-All numbers come from the governed marts + the deterministic stats engine.
+No SQL is hand-authored here (G1); the cost is checked before running (G3).
 """
 from __future__ import annotations
 from dataclasses import dataclass
 
 from .stats import decompose_change, two_proportion_ztest
+from .semantic import SemanticLayer
+from .warehouse import Warehouse
 
-# The macro funnel, in order, mapped to fct_daily_funnel columns.
+# The macro funnel, in order. Each entry is a governed metric name in the registry.
 FUNNEL_STEPS = [
     ("sessions", "Sessions"),
     ("view_item_sessions", "View Item"),
@@ -20,32 +23,28 @@ FUNNEL_STEPS = [
     ("purchasing_sessions", "Purchase"),
 ]
 
-_SUM_COLS = [c for c, _ in FUNNEL_STEPS] + ["revenue"]
-
-WEEKLY_SQL = """
-SELECT
-    DATE_TRUNC(event_date, WEEK(MONDAY)) AS week,
-    channel_group,
-    device_category,
-    SUM(sessions)                   AS sessions,
-    SUM(view_item_sessions)         AS view_item_sessions,
-    SUM(add_to_cart_sessions)       AS add_to_cart_sessions,
-    SUM(begin_checkout_sessions)    AS begin_checkout_sessions,
-    SUM(add_shipping_info_sessions) AS add_shipping_info_sessions,
-    SUM(add_payment_info_sessions)  AS add_payment_info_sessions,
-    SUM(purchasing_sessions)        AS purchasing_sessions,
-    SUM(revenue)                    AS revenue
-FROM `{project}.{dataset}.fct_daily_funnel`
-GROUP BY 1, 2, 3
-ORDER BY 1
-"""
+_METRICS = [c for c, _ in FUNNEL_STEPS] + ["revenue"]
+_SUM_COLS = list(_METRICS)
+_DIMENSIONS = ["week", "channel_group", "device_category"]
 
 
-def load_weekly(client, project: str, dataset: str):
-    """Return a pandas DataFrame at (week x channel_group x device_category) grain."""
+def build_weekly_sql(project: str | None, dataset: str, layer: SemanticLayer | None = None) -> str:
+    """Compose the governed weekly funnel query from the registry (never hand-authored)."""
+    layer = layer or SemanticLayer()
+    return layer.build_query(_METRICS, _DIMENSIONS, project=project, dataset=dataset)
+
+
+def load_weekly(client, project: str, dataset: str, *,
+                layer: SemanticLayer | None = None, warehouse: Warehouse | None = None):
+    """Return a pandas DataFrame at (week x channel_group x device_category) grain.
+
+    The SQL is composed by the semantic layer (G1) and executed through the warehouse,
+    which dry-run cost-checks it first (G3). `layer`/`warehouse` are injectable for tests.
+    """
     import pandas as pd
-    sql = WEEKLY_SQL.format(project=project, dataset=dataset)
-    rows = [dict(r) for r in client.query(sql).result()]  # no pyarrow/db-dtypes needed
+    sql = build_weekly_sql(project, dataset, layer)
+    wh = warehouse or Warehouse(client, project=project)
+    rows = wh.run_query(sql)
     df = pd.DataFrame(rows)
     df["week"] = df["week"].astype(str)
     for c in _SUM_COLS:
