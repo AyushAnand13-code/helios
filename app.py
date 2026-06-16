@@ -11,7 +11,13 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from helios.diagnosis import load_weekly, weeks_in, biggest_move, run_diagnosis, FUNNEL_STEPS
+from datetime import date
+
+from helios.diagnosis import (load_weekly, weeks_in, biggest_move, most_anomalous_move,
+                              run_diagnosis, FUNNEL_STEPS)
+from helios.critic import critique
+from helios.report.brief_md import recommended_experiment
+from helios.memory import decide
 
 st.set_page_config(page_title="Helios — Growth Diagnosis", layout="wide")
 
@@ -107,7 +113,7 @@ with st.sidebar:
 try:
     df = get_data(project, dataset)
 except Exception as e:  # noqa: BLE001
-    st.error(f"Couldn't load data from `{project}.{dataset}.fct_daily_funnel`.\n\n{e}\n\n"
+    st.error(f"Couldn't load data from `{project}.{dataset}.fct_funnel`.\n\n{e}\n\n"
              "Have you run `dbt build` and `gcloud auth application-default login`?")
     st.stop()
 
@@ -117,13 +123,21 @@ if len(weeks) < 2:
     st.stop()
 
 auto0, auto1 = biggest_move(df)
+fc0, fc1 = most_anomalous_move(df)
 
 with st.sidebar:
     st.header("Compare weeks")
-    use_auto = st.checkbox("Auto: biggest week-over-week move", value=True)
-    if use_auto:
+    mode = st.radio("Week selection",
+                    ["Forecast-flagged anomaly", "Biggest week-over-week move", "Manual"],
+                    index=0,
+                    help="Forecast-based detection ignores low-volume boundary weeks whose "
+                         "rate is normal — unlike the raw biggest move.")
+    if mode == "Forecast-flagged anomaly":
+        w0, w1 = fc0, fc1
+        st.caption(f"Anomaly flagged: **{w0} → {w1}**")
+    elif mode == "Biggest week-over-week move":
         w0, w1 = auto0, auto1
-        st.caption(f"Biggest move detected: **{w0} → {w1}**")
+        st.caption(f"Biggest move: **{w0} → {w1}**")
     else:
         w0 = st.selectbox("Baseline week", weeks, index=weeks.index(auto0))
         later = [w for w in weeks if w > w0] or [weeks[-1]]
@@ -131,10 +145,20 @@ with st.sidebar:
                           index=later.index(auto1) if auto1 in later else 0)
 
 d = run_diagnosis(df, w0, w1)
+report = critique(d)                                        # verify-then-trust
+decision = decide(d, report, as_of=date.today().isoformat(), store=None)
 
 # ---- headline metrics ----
 direction = "drop" if d.delta < 0 else "rise"
 st.subheader(f"Session conversion {direction}:  {w0}  →  {w1}")
+
+# Critic verdict + what the autonomous run would do with this finding.
+_verdict_box = {"SHIP": st.success, "REVISE": st.warning, "REFUTE": st.error}.get(
+    report.verdict, st.info)
+_verdict_box(
+    f"**Critic verdict: {report.verdict}**  ·  Autonomous status: **{decision.status}** — "
+    + ("a fresh, material finding — the daily run would alert the team."
+       if decision.status == "NEW" else f"the run would suppress this ({decision.reason})."))
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Conversion — baseline", f"{d.conv_t0 * 100:.2f}%")
@@ -161,6 +185,17 @@ if d.dominant == "mix":
 else:
     st.info("**Dominant effect: RATE** — a real in-segment behaviour change. Worth a funnel / UX "
             "investigation in the top driver segment below.")
+
+# ---- Critic review (verify-then-trust) ----
+st.markdown("### Critic review — verify-then-trust")
+st.caption("Every finding is attacked before it ships: reconcile (does the decomposition add "
+           "up?), materiality, significance, honest mix-vs-rate framing, dollar bounds, and a "
+           "funnel data-quality check.")
+_icons = {"PASS": "✅", "WARN": "⚠️", "FAIL": "⛔"}
+critic_df = pd.DataFrame([
+    {"": _icons.get(c.status, ""), "Check": c.name, "Detail": c.detail}
+    for c in report.checks])
+st.dataframe(critic_df, hide_index=True, use_container_width=True)
 
 # ---- funnel + drivers ----
 left, right = st.columns([1, 1.3])
@@ -198,6 +233,21 @@ else:
     st.write(f"Drill the rate change in **{top}** — run a funnel-step diagnosis and a targeted "
              f"experiment there; it carries the largest in-segment behaviour move "
              f"(**${d.revenue_at_risk:,.0f}** at risk this week).")
+
+# ---- recommended experiment (powered) ----
+_exp = recommended_experiment(d) if (report.verdict != "REFUTE" and d.dominant == "rate") else None
+if _exp is not None:
+    st.markdown("### Recommended experiment (powered)")
+    st.write(f"**Hypothesis:** {_exp.hypothesis}")
+    e1, e2, e3 = st.columns(3)
+    e1.metric("Sample size / arm", f"{_exp.n_per_arm:,}")
+    e2.metric("Runtime", f"~{_exp.runtime_days} days" if _exp.runtime_days is not None else "n/a")
+    e3.metric("Feasible (≤6 wks)?", "Yes" if _exp.feasible else "Slow")
+    st.caption(f"{_exp.arms}-arm {_exp.split} split · detect +{_exp.mde_rel * 100:.0f}% at "
+               f"alpha={_exp.alpha}, power={_exp.power:.0%} · primary "
+               f"`{_exp.primary_metric}` · guardrails: "
+               + ", ".join(f"`{g}`" for g in _exp.guardrails)
+               + ". Sized via two-proportion power analysis (`helios.experiment`).")
 
 # ---- grounded AI Decision Brief (v1) ----
 st.divider()
@@ -257,11 +307,17 @@ except Exception as e:  # noqa: BLE001
 
 with st.expander("How is this computed?"):
     st.markdown(
-        "- **Data**: `fct_daily_funnel` (governed dbt mart), sliced by `channel_group × device_category`.\n"
+        "- **Data**: governed query composed from the registry by `semantic-mcp.build_query` over "
+        "`fct_funnel` (session grain), dry-run cost-checked by `warehouse-mcp` — no hand-written SQL.\n"
+        "- **Week selection**: forecast-based anomaly detection on the conversion-rate series "
+        "(`helios.stats.detect_anomaly`), robust to partial boundary weeks.\n"
         "- **Decomposition**: `ΔR = mix + rate + interaction` (`helios.stats.decompose_change`), the "
         "Simpson's-paradox-safe split of the aggregate conversion change.\n"
         "- **Significance**: pooled two-proportion z-test (`helios.stats.two_proportion_ztest`).\n"
-        "- **Revenue at risk**: `rate_effect × sessions × AOV`.\n"
+        "- **Critic**: every finding is attacked (reconcile / significance / framing / dollars / "
+        "data-quality) before it ships (`helios.critic`).\n"
+        "- **Experiment**: a powered A/B test sized via two-proportion power analysis "
+        "(`helios.experiment`).\n"
         "- **AI brief**: an LLM calls the governed tools above (grounding) — it never writes SQL "
         "or computes a statistic itself."
     )
