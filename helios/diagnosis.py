@@ -93,8 +93,13 @@ class Diagnosis:
     funnel_t1: dict
 
 
-def run_diagnosis(df, w0: str, w1: str) -> Diagnosis:
-    """Decompose the conversion change between two weeks into mix/rate + dollars."""
+def run_diagnosis(df, w0: str, w1: str, *, decompose=decompose_change,
+                  significance=two_proportion_ztest) -> Diagnosis:
+    """Decompose the conversion change between two weeks into mix/rate + dollars.
+
+    `decompose`/`significance` are injectable so the agent Orchestrator can route those two
+    governed steps through the Toolbox (allow-list enforcement + audit trace); they default
+    to the real deterministic functions for the plain pipeline."""
     sub = df[df["week"].isin([w0, w1])]
 
     keyed: dict = {}
@@ -109,14 +114,14 @@ def run_diagnosis(df, w0: str, w1: str) -> Diagnosis:
             s["den_t1"] += r.sessions
 
     segs = [{"segment": f"{ch} / {dev}", **v} for (ch, dev), v in keyed.items()]
-    res = decompose_change(segs)
+    res = decompose(segs)
 
     t0, t1 = df[df.week == w0], df[df.week == w1]
     sess_t0, sess_t1 = int(t0.sessions.sum()), int(t1.sessions.sum())
     pur_t0, pur_t1 = int(t0.purchasing_sessions.sum()), int(t1.purchasing_sessions.sum())
     rev_t1 = float(t1.revenue.sum())
 
-    sig = two_proportion_ztest(pur_t0, sess_t0, pur_t1, sess_t1)
+    sig = significance(pur_t0, sess_t0, pur_t1, sess_t1)
     aov = rev_t1 / pur_t1 if pur_t1 else 0.0
     revenue_at_risk = res.rate_effect * sess_t1 * aov
 
