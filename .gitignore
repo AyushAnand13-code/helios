@@ -37,6 +37,10 @@ eval/benchmark_results/*
 # ── Autonomous-run output (generated Decision Briefs; CI uploads them as artifacts) ──
 briefs/
 
+# ── Diagnosis memory store (local report-mcp state; persist out-of-band in prod) ──
+# Root-anchored so it does NOT match the helios/memory/ source package.
+/memory/
+
 # ── OS / editor ──────────────────────────────────────
 .DS_Store
 Thumbs.db

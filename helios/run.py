@@ -30,6 +30,7 @@ from pathlib import Path
 from helios.diagnosis import weeks_in, biggest_move, run_diagnosis, load_weekly
 from helios.critic import critique
 from helios.report import render_brief_md
+from helios.memory import MemoryStore, DiagnosisRecord, decide
 
 
 @dataclass
@@ -41,6 +42,13 @@ class RunResult:
     markdown: str
     path: Path | None
     note: str = ""
+    status: str = "NEW"          # NEW | SEASONAL | REFUTED | IMMATERIAL | REPEAT | NO_DATA
+    suppress_reason: str = ""
+
+    @property
+    def alert(self) -> bool:
+        """Whether this run should page the team (only fresh, material findings do)."""
+        return self.status == "NEW"
 
 
 # ── data sources ──────────────────────────────────────────────────────────────────
@@ -85,9 +93,12 @@ def _post_slack(webhook: str, text: str) -> str:
 def generate(*, source: str = "synthetic", project: str | None = None,
              dataset: str = "helios_dev", days: int = 90,
              as_of: str | None = None, out_dir: str | Path = "briefs",
-             end_date: date | None = None) -> RunResult:
+             end_date: date | None = None,
+             memory: MemoryStore | None = None) -> RunResult:
     """Run the full diagnosis -> critic -> brief pipeline and write a dated Markdown brief.
-    Returns the RunResult (also when there isn't enough data to diagnose)."""
+    If a MemoryStore is given, consult it (+ the seasonality calendar) to decide whether
+    the finding is NEW (alert + remember) or should be suppressed (SEASONAL / REFUTED /
+    IMMATERIAL / REPEAT). Returns the RunResult (also when there isn't enough data)."""
     as_of = as_of or date.today().isoformat()
     end = end_date or date.today()
 
@@ -104,26 +115,42 @@ def generate(*, source: str = "synthetic", project: str | None = None,
     if len(weeks_in(df)) < 2:
         note = "Not enough data: need at least two weeks to compare. No brief written."
         return RunResult(as_of, source_label, None, None, f"# Helios — {as_of}\n\n{note}\n",
-                         None, note)
+                         None, note, status="NO_DATA", suppress_reason=note)
 
     w0, w1 = biggest_move(df)
     d = run_diagnosis(df, w0, w1)
     report = critique(d)
+
+    # Memory: is this finding worth paging on, or expected / already seen?
+    status, suppress_reason = "NEW", "new material finding"
+    if memory is not None:
+        dec = decide(d, report, as_of=as_of, store=memory)
+        status, suppress_reason = dec.status, dec.reason
+        if not dec.suppress:
+            memory.save_diagnosis(DiagnosisRecord.from_diagnosis(d, as_of=as_of,
+                                                                 verdict=report.verdict))
+
     md = render_brief_md(d, report, as_of=as_of, source_label=source_label)
+    banner = (f"> **Status: {status}** — {suppress_reason}. "
+              f"{'Alerting the team.' if status == 'NEW' else 'Not alerting (suppressed).'}\n\n")
+    md = md.split("\n", 1)
+    md = md[0] + "\n" + banner + (md[1] if len(md) > 1 else "")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{as_of}_decision_brief.md"
     path.write_text(md, encoding="utf-8")
-    return RunResult(as_of, source_label, d, report, md, path)
+    return RunResult(as_of, source_label, d, report, md, path,
+                     status=status, suppress_reason=suppress_reason)
 
 
 def _summary_line(r: RunResult) -> str:
     if r.diagnosis is None:
         return f"[{r.as_of}] {r.note}"
     d = r.diagnosis
-    return (f"[{r.as_of}] Helios {r.report.verdict}: session conversion "
+    return (f"[{r.as_of}] {r.status} (Critic {r.report.verdict}): session conversion "
             f"{d.conv_t0*100:.2f}% -> {d.conv_t1*100:.2f}% ({d.delta*100:+.2f}pt), "
-            f"dominant={d.dominant}, revenue_at_risk=${d.revenue_at_risk:,.0f}")
+            f"dominant={d.dominant}, revenue_at_risk=${d.revenue_at_risk:,.0f}"
+            + ("" if r.alert else f" — suppressed ({r.suppress_reason})"))
 
 
 def main() -> int:
@@ -135,18 +162,26 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=90, help="synthetic window length")
     ap.add_argument("--out-dir", default="briefs")
     ap.add_argument("--date", default=None, help="brief date label YYYY-MM-DD (default today)")
+    ap.add_argument("--memory", default=os.environ.get("HELIOS_MEMORY_PATH",
+                    "memory/diagnoses.jsonl"), help="memory store path (suppress repeats/seasonal)")
+    ap.add_argument("--no-memory", action="store_true", help="disable memory (stateless run)")
     args = ap.parse_args()
 
     end = (datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else date.today())
+    memory = None if args.no_memory else MemoryStore(args.memory)
     r = generate(source=args.source, project=args.project, dataset=args.dataset,
-                 days=args.days, as_of=args.date, out_dir=args.out_dir, end_date=end)
+                 days=args.days, as_of=args.date, out_dir=args.out_dir, end_date=end,
+                 memory=memory)
 
     print(_summary_line(r))
     if r.path:
         print(f"Wrote {r.path}")
+    # Only page the team on a fresh, material finding — not on repeats or seasonal swings.
     webhook = os.environ.get("HELIOS_SLACK_WEBHOOK")
-    if webhook:
+    if webhook and r.alert:
         print(_post_slack(webhook, _summary_line(r)))
+    elif webhook:
+        print(f"slack: skipped (status {r.status})")
     return 0
 
 
