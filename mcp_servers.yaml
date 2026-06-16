@@ -1,6 +1,19 @@
-# Helios MCP server registry — STUB (finalized in M6).
-# In M6 this declares the warehouse-mcp / semantic-mcp servers and points
-# `registry:` at models/semantic/semantic_layer.yaml. For now it only needs to exist.
-servers: {}
-  # TODO (M6): add semantic-mcp + warehouse-mcp entries; wire registry to
-  #            models/semantic/semantic_layer.yaml and the warehouse HTTP endpoint.
+# Helios MCP server registry.
+#
+# LIVE:
+#   stats-mcp — the only path to math (Bible section 18; the v1 keystone in
+#   docs/planning/LEAN_SCOPE.md). Thin stdio wrapper over helios.stats + helios.critic.
+#   Claude Code launches it via .mcp.json; this entry is the canonical declaration.
+#
+# PLANNED (M6+): semantic-mcp (registry -> governed SQL) + warehouse-mcp (BigQuery HTTP),
+#   then experiment-mcp and report-mcp. semantic-mcp's `registry:` will point at
+#   models/semantic/semantic_layer.yaml.
+servers:
+  stats-mcp:
+    transport: stdio
+    command: python
+    args: ["-m", "helios.mcp.stats"]
+    description: >-
+      Deterministic stats as governed tools: decompose_change (mix/rate/interaction),
+      significance_test (two-proportion z-test), critique_decomposition (verify-then-trust).
+    tools: [decompose_change, significance_test, critique_decomposition]

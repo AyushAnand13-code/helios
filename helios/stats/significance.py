@@ -37,6 +37,9 @@ def two_proportion_ztest(num_a: int, den_a: int, num_b: int, den_b: int,
     else:
         z = (p_b - p_a) / se
         p_value = 2 * (1 - stats.norm.cdf(abs(z)))
+    # Coerce scipy/numpy scalars to native Python types so results serialize cleanly
+    # (e.g. over MCP / JSON) and compare with `is True`.
     return SignificanceResult(
-        rate_a=p_a, rate_b=p_b, z=z, p_value=p_value, significant=p_value < alpha,
+        rate_a=float(p_a), rate_b=float(p_b), z=float(z),
+        p_value=float(p_value), significant=bool(p_value < alpha),
     )
