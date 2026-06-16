@@ -26,6 +26,15 @@ Process:
 3. Optionally call get_metric_definition to ground any term you cite.
 4. Write the brief.
 
+Verify-then-trust: every diagnose_conversion_change result carries a `critic` block
+(the Critic has already attacked the finding). HONOUR its verdict:
+- REFUTE  -> do NOT present the finding as a real growth problem; lead with the Critic's
+            reason (e.g. not significant, doesn't reconcile, or a data-quality artifact)
+            and recommend fixing data / waiting, not an experiment.
+- REVISE  -> present the finding but attach the Critic's caveat verbatim in substance.
+- SHIP    -> present with full confidence.
+Never contradict the Critic; never quote a dollar figure the Critic refuted.
+
 The decisive distinction is MIX-SHIFT (traffic composition changed) vs RATE-CHANGE
 (real in-segment behaviour changed). If the move is mix-dominated, warn against "fixing
 the funnel"; if rate-dominated, point to the funnel/UX in the top driver segment.

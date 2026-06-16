@@ -24,7 +24,10 @@ import argparse
 import os
 import sys
 
+from types import SimpleNamespace
+
 from helios.stats import decompose_change, two_proportion_ztest
+from helios.critic import critique
 
 
 def get_client(project: str | None):
@@ -172,6 +175,23 @@ def main() -> int:
         top = result.segments[0]
         print(f"  Drill the rate change in '{top.segment}' — run a funnel-step diagnosis and a")
         print(f"  targeted experiment there; it carries the largest in-segment behaviour move.")
+
+    # Verify-then-trust: attack the finding before it ships (principle #2).
+    diag = SimpleNamespace(
+        delta=result.delta, mix=result.mix_effect, rate=result.rate_effect,
+        interaction=result.interaction, dominant=result.dominant_effect,
+        conv_t0=result.r_t0, conv_t1=result.r_t1,
+        p_value=sig.p_value, significant=sig.significant,
+        sessions_t1=sess_t1, aov=aov, revenue_at_risk=rev_at_risk,
+        drivers=[{"segment": c.segment} for c in result.segments],
+        funnel_t0={}, funnel_t1={},  # CLI path has no per-step funnel; monotonicity check no-ops
+    )
+    report = critique(diag)
+    print(f"\nCRITIC REVIEW  (verify-then-trust)")
+    print("  " + report.render().replace("\n", "\n  "))
+    if report.verdict == "REFUTE":
+        print("  -> Finding REFUTED: do not act on the above as stated; see failed check(s).")
+
     print("\n" + "=" * 70)
     print("All figures are governed mart + deterministic-stats outputs (no LLM, no hand SQL).")
     return 0
