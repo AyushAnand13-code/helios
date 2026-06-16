@@ -96,7 +96,7 @@ Root-cause accuracy **≥85%** (vs **≤45%** naive baseline); time-to-diagnosis
 - **Engaged session:** `session_engaged = '1' OR engagement_time_msec >= 10000` (use `>=`, no extra clauses).
 - **`traffic_source` gotcha:** event-level `traffic_source.*` is **user first-touch**, not session source. Prefer session-scoped `event_params.source/medium`; fall back to `traffic_source` only when null.
 - **Money & rates:** use only GA4 `_in_usd` columns; never aggregate non-USD twins. Compute rates as `SUM(numerator)/SUM(denominator)` after grouping — **never** an average of per-segment ratios (this is the Simpson's-paradox defense).
-- **Single sources of truth:** channel grouping lives **only** in the `channel_group_case()` macro (`macros/channel_group.sql`); metric/dimension definitions live **only** in `models/semantic/semantic_layer.yaml` (the v2 registry; the retired v1 `semantic_models.yml` is archived in `docs/archive/superseded/`). `semantic-mcp`'s `registry:` in `mcp_servers.yaml` must point at that exact path.
+- **Single sources of truth:** channel grouping lives **only** in the `channel_group_case()` macro (`macros/channel_group.sql`); metric/dimension definitions live **only** in `semantic/semantic_layer.yaml` (the v2 registry, **at the repo root — deliberately OUTSIDE `models/`** so dbt doesn't parse it as a schema file; the retired v1 `semantic_models.yml` is archived in `docs/archive/superseded/`). `semantic-mcp`'s `registry:` in `mcp_servers.yaml` and `SemanticLayer.DEFAULT_REGISTRY` must point at that exact path.
 
 ---
 
@@ -110,7 +110,7 @@ helios/
 │  ├─ planning/      DEPENDENCY_MAP · DEVELOPMENT_PLAN · IMPLEMENTATION_PLAYBOOK · LEAN_SCOPE
 │  ├─ strategy/      CLAUDE_CODE_WORKFLOW · INTERVIEW_GUIDE · RED_TEAM_REVIEW
 │  └─ archive/       (frozen intermediate fragments + superseded/semantic_models.yml)
-├─ models/semantic/ semantic_layer.yaml        # the governed registry (v2, 47 metrics)
+├─ semantic/ semantic_layer.yaml               # the governed registry (v2, 49 metrics) — OUTSIDE models/ so dbt won't parse it
 ├─ eval/
 │  ├─ scenarios/     scenarios.yaml + 01–07_*.yaml + _VALIDATION.md   (50-scenario benchmark)
 │  └─ benchmark_results/
@@ -154,7 +154,7 @@ python -m helios.eval.runner --full     # all 50 scenarios (PR to main)
 ## 8. Keystones — get these right, test them hard (they fail SILENTLY)
 
 1. **`int_ga4__sessionized` + `int_ga4__funnel_steps`** — if sessionization or the `reached_*` flags are wrong, every downstream number is silently wrong.
-2. **`models/semantic/semantic_layer.yaml`** — the governance keystone; all governed SQL derives from it.
+2. **`semantic/semantic_layer.yaml`** — the governance keystone; all governed SQL derives from it.
 3. **`stats-mcp.decompose_change`** — unit-test against hand-worked mix/rate/interaction examples (golden values).
 4. **Revenue reconciliation** — `fct_orders` revenue must match the source to the cent (`revenue_reconciles` test).
 5. **`fct_daily_funnel`** aggregates `fct_funnel` (which carries `session_revenue`) — not `int_ga4__funnel_steps`. Dropping revenue here breaks the eval's dollar-at-risk labels.
@@ -185,12 +185,21 @@ The **CI eval gate** (`.github/workflows/ci.yml` + `eval/gates.yaml`) is the reg
 
 > Last refreshed 2026-06-16. A working **MVP is built and deployed** — the docs suite is no longer the only artifact.
 
+### Verified end-to-end on REAL GA4 (2026-06-16)
+Run against `bigquery-public-data.ga4_obfuscated_sample_ecommerce` in project `helios-mvp`:
+- **`dbt build` → PASS=62 WARN=1 ERROR=0.** 4.3M events → 360k sessions → `fct_funnel` → 64k `fct_daily_funnel`. Keystones green: `assert_funnel_monotonicity`, `assert_session_conversion_rate_bounds`, both unit tests. (The 1 WARN = `test_revenue_reconciles_fct_funnel_session_revenue`, 1 row — `severity: warn`; investigate later.)
+- **Governed heartbeat on the real marts** (`python -m helios.run --source bigquery`): produced a real brief — session conversion 1.64%→1.06% (−0.59pt, p≈9e-9), dominant=rate, drivers Referral/desktop+mobile, −$7,538. Whole governed path exercised (build_query → dry_run → run_query → decompose → critic).
+- **Grounded LLM brief** (`brief.py`, real Gemini key): every number in the narrative traced to the two tool calls and matched the deterministic run exactly — G1/G2 proven on real data.
+- **Datasets:** after the `dbt_project.yml` fix, marts land in **`helios_dev_marts`** (target `helios_dev` + `+schema: marts`), staging in `helios_dev_staging`. App/CLI defaults updated to `helios_dev_marts`.
+
+**Known issues / honest caveats:** the labeled eval's 100% is *controlled-attribution* accuracy on synthesized data (not real-world accuracy — frame precisely); the dashboard demo runs on *synthetic* data; dbt group/access governance is deferred; mart partitioning/clustering is deferred (models pin `materialized='table'` in-file); 1-row revenue-reconcile WARN.
+
 ### Architecture note — the MVP is *flattened*, not the full agent/MCP mesh (yet)
 The Bible specifies 5 MCP servers + 7 SDK agents. The shipped MVP collapses that into a single in-process Python package + a Streamlit app, holding the **five non-negotiable principles** (§3) by structure rather than by separate servers: governed marts (no hand SQL in the diagnosis path), deterministic math in real Python, every finding carrying significance + dollars + an action. **The top-level `mcp/`, `agents/`, `backend/`, `frontend/` dirs are still empty placeholders** — working code lives in `helios/` + root scripts + `app.py`.
 
 ### Built & working (live)
 - **Data spine (dbt):** `models/staging → intermediate → marts` (`stg_ga4__events`/`event_params`, `int_ga4__sessionized`, `int_ga4__funnel_steps`, `fct_funnel`, `fct_daily_funnel`, `fct_orders`, `dim_channels`, `dim_date`) + the four macros (`channel_group`, `sessionize`, `get_event_param`) + seed. `dbt_project.yml`/`profiles.yml`/`packages.yml` present.
-- **Semantic registry:** `models/semantic/semantic_layer.yaml` (governance keystone).
+- **Semantic registry:** `semantic/semantic_layer.yaml` (governance keystone; at repo root, outside `models/`).
 - **Math engine:** `helios/stats/decompose.py` (mix/rate/interaction — the centerpiece) + `significance.py` (two-proportion z-test). Golden-tested in `tests/test_decompose.py`.
 - **Diagnosis:** `helios/diagnosis.py` (shared by CLI + dashboard) → `diagnose.py` (templated Decision Brief, no LLM).
 - **Grounded LLM brief:** `helios/llm/tools.py` (`GovernedTools` — the LLM's only data path; logs every call) + `brief.py` (Gemini, provider-swappable) → `brief.py` CLI.

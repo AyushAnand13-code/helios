@@ -7,7 +7,7 @@ name: Daily Decision Brief
 # To run against the real governed marts instead, set repo secrets and swap the run step:
 #   - add GCP_SA_KEY (read-only BigQuery SA JSON) and authenticate (google-github-actions/auth)
 #   - pip install google-cloud-bigquery
-#   - python -m helios.run --source bigquery --project <id> --dataset helios_dev
+#   - python -m helios.run --source bigquery --project <id> --dataset helios_dev_marts
 # To fan the headline out to Slack, add a HELIOS_SLACK_WEBHOOK secret and pass it as env.
 
 on:

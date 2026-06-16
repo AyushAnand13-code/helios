@@ -8,7 +8,7 @@
 #   All stdio wrappers; Claude Code launches them via .mcp.json.
 #
 # PLANNED: experiment-mcp.
-registry: models/semantic/semantic_layer.yaml
+registry: semantic/semantic_layer.yaml
 servers:
   stats-mcp:
     transport: stdio
@@ -22,7 +22,7 @@ servers:
     transport: stdio
     command: python
     args: ["-m", "helios.mcp.semantic"]
-    registry: models/semantic/semantic_layer.yaml
+    registry: semantic/semantic_layer.yaml
     description: >-
       Governed SQL composition from the registry. Never hand-authors SQL (G1); unknown
       names are hard errors (G5).
