@@ -8,7 +8,7 @@ the same Decision Brief as the flat pipeline, plus the audit trace and a human-r
 from __future__ import annotations
 from dataclasses import dataclass, field
 
-from helios.diagnosis import biggest_move, run_diagnosis
+from helios.diagnosis import most_anomalous_move, run_diagnosis
 from helios.semantic import SemanticLayer
 from helios.report.brief_md import recommended_experiment
 from .toolbox import Toolbox, TraceEntry
@@ -35,9 +35,10 @@ def orchestrate(df, *, as_of: str, source_label: str, layer: SemanticLayer | Non
     tb = Toolbox(layer=layer, store=store, warehouse=warehouse, calendar=calendar, as_of=as_of)
     plan: list[str] = []
 
-    # Monitor — pick the move to investigate.
-    w0, w1 = biggest_move(df)
-    plan.append(f"Monitor: selected the biggest week-over-week move {w0} → {w1}")
+    # Monitor — pick the move to investigate by forecast-based anomaly detection
+    # (robust to partial boundary weeks), not the biggest raw delta.
+    w0, w1 = most_anomalous_move(df)
+    plan.append(f"Monitor: forecast-based anomaly detection flagged week {w1} (vs {w0})")
 
     # Decompose + Diagnose — routed through the Toolbox (enforced + traced).
     d = run_diagnosis(
