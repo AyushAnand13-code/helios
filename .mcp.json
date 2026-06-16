@@ -9,6 +9,11 @@
       "command": ".venv/Scripts/python.exe",
       "args": ["-m", "helios.mcp.semantic"],
       "env": {}
+    },
+    "warehouse-mcp": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "helios.mcp.warehouse"],
+      "env": {}
     }
   }
 }
