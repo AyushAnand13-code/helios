@@ -99,6 +99,9 @@ st.markdown(
         Helios — Autonomous Growth Diagnosis</div>
       <div style="color:#EEF0FF; font-size:1.05rem; margin-top:.4rem; opacity:.95;">
         Governed mix-vs-rate funnel diagnosis on real GA4 data — no LLM-written SQL, no in-prose math.</div>
+      <div style="color:#EEF0FF; font-size:.92rem; margin-top:.3rem; opacity:.82;">
+        In plain words: it figures out <b>why</b> the store's conversion moved, tells a real change
+        from a traffic-mix illusion, prices it in dollars, and proposes a fix — without letting the AI invent any numbers.</div>
     </div>
     """,
     unsafe_allow_html=True,
