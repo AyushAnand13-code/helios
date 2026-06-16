@@ -73,7 +73,5 @@ seeds:
         medium: string
         channel_group: string
 
-snapshots:
-  helios:
-    +target_schema: snapshots
-    +tags: ['snapshot']
+# (No snapshots yet — the `snapshots:` config is omitted so it isn't an unused path.
+#  Re-add it with a `+target_schema` when the first snapshot model lands.)
