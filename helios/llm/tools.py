@@ -22,7 +22,7 @@ class GovernedTools:
     """Holds the loaded funnel data + metric registry and exposes the callable tools.
 
     Pass a pre-loaded weekly DataFrame (from helios.diagnosis.load_weekly) and the path
-    to models/semantic/semantic_layer.yaml.
+    to semantic/semantic_layer.yaml.
     """
 
     def __init__(self, df, registry_path: str | Path):

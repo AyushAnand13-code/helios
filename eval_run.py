@@ -6,7 +6,7 @@ mix-vs-rate decomposition recovers the true cause, vs a naive 'largest-segment-d
 baseline. Controlled-attribution accuracy (not causal): we know the injected cause.
 
 Usage:  python eval_run.py
-        python eval_run.py --project helios-mvp --dataset helios_dev
+        python eval_run.py --project helios-mvp --dataset helios_dev_marts
 """
 from __future__ import annotations
 import argparse
@@ -17,7 +17,7 @@ import sys
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", default=os.environ.get("HELIOS_PROJECT", "helios-mvp"))
-    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
+    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev_marts"))
     args = ap.parse_args()
 
     from google.cloud import bigquery

@@ -25,7 +25,7 @@ except ImportError as e:  # pragma: no cover
 from helios.semantic import SemanticLayer, SemanticError
 
 mcp = FastMCP("semantic-mcp")
-_layer = SemanticLayer()   # loads models/semantic/semantic_layer.yaml
+_layer = SemanticLayer()   # loads semantic/semantic_layer.yaml
 
 
 @mcp.tool()
@@ -57,7 +57,7 @@ def get_metric(name: str) -> dict:
 @mcp.tool()
 def build_query(metrics: list[str], dimensions: list[str] | None = None,
                 filters: list[dict] | None = None,
-                project: str | None = None, dataset: str = "helios_dev") -> dict:
+                project: str | None = None, dataset: str = "helios_dev_marts") -> dict:
     """Compose a GOVERNED SQL SELECT for the given metrics grouped by the given dimensions
     (optionally filtered). The SQL is assembled only from registered definitions — never
     hand-typed. `filters` is a list of {dimension, op, value} (op one of =, !=, >, >=, <,

@@ -12,7 +12,7 @@ Setup (one-time):
 
 Usage:
     python brief.py
-    python brief.py --project helios-mvp --dataset helios_dev --model gemini-2.5-flash
+    python brief.py --project helios-mvp --dataset helios_dev_marts --model gemini-2.5-flash
 """
 from __future__ import annotations
 import argparse
@@ -20,13 +20,13 @@ import os
 import sys
 from pathlib import Path
 
-REGISTRY = Path(__file__).resolve().parent / "models" / "semantic" / "semantic_layer.yaml"
+REGISTRY = Path(__file__).resolve().parent / "semantic" / "semantic_layer.yaml"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", default=os.environ.get("HELIOS_PROJECT", "helios-mvp"))
-    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
+    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev_marts"))
     ap.add_argument("--model", default=os.environ.get("HELIOS_GEMINI_MODEL", "gemini-2.5-flash"))
     args = ap.parse_args()
 

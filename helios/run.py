@@ -14,7 +14,7 @@ Data sources:
 
 Usage:
     python -m helios.run                                   # synthetic, today, ./briefs
-    python -m helios.run --source bigquery --project p --dataset helios_dev
+    python -m helios.run --source bigquery --project p --dataset helios_dev_marts
     python -m helios.run --out-dir briefs --date 2021-01-31
 Optional sink: set HELIOS_SLACK_WEBHOOK to post the headline to Slack.
 """
@@ -91,7 +91,7 @@ def _post_slack(webhook: str, text: str) -> str:
 
 # ── orchestration ─────────────────────────────────────────────────────────────────
 def generate(*, source: str = "synthetic", project: str | None = None,
-             dataset: str = "helios_dev", days: int = 90,
+             dataset: str = "helios_dev_marts", days: int = 90,
              as_of: str | None = None, out_dir: str | Path = "briefs",
              end_date: date | None = None,
              memory: MemoryStore | None = None) -> RunResult:
@@ -158,7 +158,7 @@ def main() -> int:
     ap.add_argument("--source", choices=["synthetic", "bigquery"],
                     default=os.environ.get("HELIOS_SOURCE", "synthetic"))
     ap.add_argument("--project", default=os.environ.get("HELIOS_PROJECT"))
-    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
+    ap.add_argument("--dataset", default=os.environ.get("HELIOS_MARTS_DATASET", "helios_dev_marts"))
     ap.add_argument("--days", type=int, default=90, help="synthetic window length")
     ap.add_argument("--out-dir", default="briefs")
     ap.add_argument("--date", default=None, help="brief date label YYYY-MM-DD (default today)")

@@ -5,11 +5,11 @@ require-dbt-version: '>=1.7.0'
 
 profile: helios
 
-# TEMPORARY (until M5): scan only the built layers, NOT models/semantic/.
-# The registry models/semantic/semantic_layer.yaml is a custom (non-dbt) YAML and
-# would fail `dbt parse`. Restore to ['models'] at M5 once metrics__schema.yml makes
-# models/semantic/ dbt-valid. The registry file itself is NOT moved (path stays frozen).
-model-paths: ['models/staging', 'models/intermediate', 'models/marts']
+# The whole models/ tree. The governed registry lives OUTSIDE models/ (at
+# semantic/semantic_layer.yaml) precisely so it isn't parsed as a dbt schema file —
+# which lets the per-folder configs below (materialization, schema, access, partitioning)
+# actually apply to staging / intermediate / marts.
+model-paths: ['models']
 seed-paths: ['seeds']
 macro-paths: ['macros']
 snapshot-paths: ['snapshots']
@@ -37,62 +37,33 @@ models:
     relation: true
     columns: true
 
+  # NOTE: dbt group/access governance (+group / +access: private) is deferred — it needs a
+  # coherent group design (staging is referenced by intermediate, so it can't be `private`
+  # to a 'staging' group). Materialization/schema/partitioning below is what's enforced.
   helios:
     staging:
       +materialized: view
-      +group: staging
-      +access: private              # nothing outside staging may ref a stg_ model
       +tags: ['staging', 'ga4']
       +schema: staging
 
     intermediate:
-      +materialized: ephemeral       # inlined; never exposed to BI
-      +group: intermediate
-      +access: private
+      # Models set materialized='table' in-file (sessionized/funnel_steps are read by
+      # multiple marts; ephemeral re-computed them per consumer). This default matches.
+      +materialized: table
       +tags: ['intermediate', 'ga4']
 
     marts:
-      +schema: marts
+      +schema: marts                   # -> helios_dev_marts (target dataset + this schema)
       core:
-        +materialized: incremental
-        +incremental_strategy: insert_overwrite
-        +partition_by:
-          field: event_date
-          data_type: date
-          granularity: day
-        +cluster_by: ['device_category', 'channel_group']
-        # STATIC-SAMPLE RECONCILIATION: relaxed from `true` so dbt's own tests
-        # (unique/not_null/relationships/reconcile) can query these marts without a
-        # date predicate on the frozen 3-month sample. Set back to `true` for prod
-        # (it's the full-table-scan cost guard there). Partitioning itself is unchanged.
-        +require_partition_filter: false
-        +on_schema_change: append_new_columns
-        +group: marts
-        +access: public               # the semantic layer + exposures consume these
+        # Plain tables on the static 3-month sample. (Models pin materialized='table'
+        # in-file.) event_date partitioning + device/channel clustering is the intended
+        # prod optimization — deferred so dims without those columns don't break the build.
+        +materialized: table
         +tags: ['marts', 'core']
-        # Dims are small + non-partitioned: override to table.
-        dim_users:    { +materialized: table, +require_partition_filter: false }
-        dim_items:    { +materialized: table, +require_partition_filter: false }
-        dim_channels: { +materialized: table, +require_partition_filter: false }
-        dim_date:     { +materialized: table, +require_partition_filter: false }
 
       finance:
         +materialized: table
-        +group: marts
-        +access: public
         +tags: ['marts', 'finance']
-
-      growth:
-        +materialized: table
-        +group: marts
-        +access: public
-        +tags: ['marts', 'growth']
-
-    semantic:
-      +materialized: view
-      +group: marts
-      +access: public
-      +tags: ['semantic']
 
 seeds:
   helios:

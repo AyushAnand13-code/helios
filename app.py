@@ -47,7 +47,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-REGISTRY_PATH = Path(__file__).resolve().parent / "models" / "semantic" / "semantic_layer.yaml"
+REGISTRY_PATH = Path(__file__).resolve().parent / "semantic" / "semantic_layer.yaml"
 
 
 def _gemini_key() -> str | None:
@@ -102,7 +102,7 @@ st.markdown(
 with st.sidebar:
     st.header("Data source")
     project = st.text_input("GCP project", os.environ.get("HELIOS_PROJECT", "helios-mvp"))
-    dataset = st.text_input("Marts dataset", os.environ.get("HELIOS_MARTS_DATASET", "helios_dev"))
+    dataset = st.text_input("Marts dataset", os.environ.get("HELIOS_MARTS_DATASET", "helios_dev_marts"))
 
 try:
     df = get_data(project, dataset)

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 DEFAULT_REGISTRY = (Path(__file__).resolve().parents[2]
-                    / "models" / "semantic" / "semantic_layer.yaml")
+                    / "semantic" / "semantic_layer.yaml")
 
 _VALID_OPS = {"=", "!=", ">", ">=", "<", "<=", "IN", "NOT IN", "BETWEEN"}
 
@@ -62,7 +62,7 @@ class SemanticLayer:
     # ── governed SQL composition (G1) ─────────────────────────────────────────────
     def build_query(self, metrics: list[str], dimensions: list[str] | None = None,
                     filters: list[Filter | dict] | None = None, *,
-                    project: str | None = None, dataset: str = "helios_dev",
+                    project: str | None = None, dataset: str = "helios_dev_marts",
                     order_by_time: bool = True) -> str:
         """Compose a governed SELECT for `metrics` grouped by `dimensions`.
 
