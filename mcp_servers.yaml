@@ -1,13 +1,13 @@
 # Helios MCP server registry.
 #
 # LIVE:
-#   stats-mcp — the only path to math (Bible section 18; the v1 keystone in
-#   docs/planning/LEAN_SCOPE.md). Thin stdio wrapper over helios.stats + helios.critic.
-#   Claude Code launches it via .mcp.json; this entry is the canonical declaration.
+#   stats-mcp    — the only path to math (helios.stats + helios.critic).
+#   semantic-mcp — the only path to SQL (helios.semantic over the registry below).
+#   Both are stdio wrappers; Claude Code launches them via .mcp.json.
 #
-# PLANNED (M6+): semantic-mcp (registry -> governed SQL) + warehouse-mcp (BigQuery HTTP),
-#   then experiment-mcp and report-mcp. semantic-mcp's `registry:` will point at
-#   models/semantic/semantic_layer.yaml.
+# PLANNED (P1b+): warehouse-mcp (BigQuery client: dry_run/run_query/reconcile),
+#   then experiment-mcp and report-mcp.
+registry: models/semantic/semantic_layer.yaml
 servers:
   stats-mcp:
     transport: stdio
@@ -17,3 +17,12 @@ servers:
       Deterministic stats as governed tools: decompose_change (mix/rate/interaction),
       significance_test (two-proportion z-test), critique_decomposition (verify-then-trust).
     tools: [decompose_change, significance_test, critique_decomposition]
+  semantic-mcp:
+    transport: stdio
+    command: python
+    args: ["-m", "helios.mcp.semantic"]
+    registry: models/semantic/semantic_layer.yaml
+    description: >-
+      Governed SQL composition from the registry. Never hand-authors SQL (G1); unknown
+      names are hard errors (G5).
+    tools: [build_query, get_metric, list_metrics, list_dimensions]

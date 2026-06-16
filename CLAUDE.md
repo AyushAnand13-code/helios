@@ -136,7 +136,7 @@ dbt build --select +fct_daily_funnel   # model + upstream
 
 # MCP servers — stdio servers
 python -m helios.mcp.stats       # LIVE — decompose_change / significance_test / critique_decomposition
-python -m helios.mcp.semantic    # (planned, M6)
+python -m helios.mcp.semantic    # LIVE — build_query / get_metric / list_metrics / list_dimensions (governed SQL)
 python -m helios.mcp.experiment  # (planned)
 python -m helios.mcp.report      # (planned)
 python -m helios.mcp.warehouse   # (planned) streamable-http
@@ -201,6 +201,7 @@ The Bible specifies 5 MCP servers + 7 SDK agents. The shipped MVP collapses that
 - **CI gate:** `.github/workflows/ci.yml` + `eval/gates.yaml` run pytest + the labeled eval and fail on accuracy regression or any hallucinated segment. `main` is branch-protected on the `test-and-eval-gate` check.
 - **stats-mcp (the first real MCP server):** `helios/mcp/stats.py` — a stdio FastMCP wrapper exposing `decompose_change`, `significance_test`, `critique_decomposition` over MCP (`python -m helios.mcp.stats`). Declared in `mcp_servers.yaml`; Claude Code launches it via `.mcp.json`. This closes the one technical artifact LEAN_SCOPE requires for **v1** (one governed MCP server + MCP client). Tested in `tests/test_mcp_stats.py`.
 - **Autonomous run (the heartbeat — v2 P0):** `helios/run.py` (`python -m helios.run`) does headless load → diagnose → critic → dated Markdown brief (`helios/report/brief_md.py`), with a `synthetic`|`bigquery` source switch. Scheduled daily by `.github/workflows/daily-brief.yml` (synthetic source, uploads the brief as an artifact; optional Slack via `HELIOS_SLACK_WEBHOOK`). This is the first step turning Helios from reactive (dashboard) to **proactive** (principle #5). Tested in `tests/test_run.py`.
+- **semantic-mcp (the only path to SQL — v2 P1a):** `helios/semantic/layer.py` (`SemanticLayer.build_query`) composes governed SQL purely from the registry's `sql_definition`s; unknown/unsupported names and mixed grains are hard errors (G1/G5) — there is no path to free-typed SQL. Exposed over MCP at `helios/mcp/semantic.py` (`python -m helios.mcp.semantic`), declared in `.mcp.json`/`mcp_servers.yaml`. Tested in `tests/test_semantic.py` (golden weekly SQL) + `tests/test_mcp_semantic.py`. **Note:** the diagnosis path still reads via the hand-authored `WEEKLY_SQL`; rewiring it through `build_query` + warehouse-mcp is **P1b** (the remaining half of P1).
 
 ### Not started (the full mesh, per the Bible)
 The other 4 MCP servers (semantic/warehouse/experiment/report) · the 7-agent plan-execute-critique SDK orchestration · memory/`report-mcp` (`save_diagnosis`/`recall_prior`) · `experiment-mcp` (power/runtime/design) · the scheduled **autonomous run** (the product's heartbeat — currently the dashboard is the entry point). These are the **v2** scope per `docs/planning/LEAN_SCOPE.md`.

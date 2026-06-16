@@ -4,6 +4,11 @@
       "command": ".venv/Scripts/python.exe",
       "args": ["-m", "helios.mcp.stats"],
       "env": {}
+    },
+    "semantic-mcp": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "helios.mcp.semantic"],
+      "env": {}
     }
   }
 }
