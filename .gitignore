@@ -15,6 +15,8 @@ logs/
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+# Anonymous-usage UUID dbt writes per machine; machine-local, never commit.
+.user.yml
 
 # ── Secrets & credentials — NEVER commit ─────────────
 .env
